@@ -36,7 +36,6 @@ export default function Sidebar() {
 
     return (
         <aside
-            style={{ width: w, minWidth: w }}
             className="h-screen flex flex-col border-r transition-all duration-300 overflow-hidden"
             style={{ width: w, minWidth: w, background: 'var(--bg-surface)', borderColor: 'var(--border)' }}
         >
