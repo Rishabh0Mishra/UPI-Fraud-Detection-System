@@ -1,0 +1,85 @@
+=================================================================
+  UPI SYNTHETIC DATASET — REALISM VALIDATION REPORT
+=================================================================
+
+Generated: 2026-02-17 13:06:16
+Total transactions: 500,000
+
+────────────────────────────────────────
+1. FRAUD RATIO
+────────────────────────────────────────
+  Generated:  0.727%
+  Benchmark:  ~0.8% (NPCI FY24)
+  Status:     ✓ PASS
+
+────────────────────────────────────────
+2. AMOUNT DISTRIBUTION
+────────────────────────────────────────
+  % < ₹500:   78.0%  (benchmark: ~80%)
+  Mean:       ₹591  (benchmark: ~₹1,457)
+  Median:     ₹209  (benchmark: ~₹250)
+  Status:     ✓ % < ₹500
+
+────────────────────────────────────────
+3. TRANSACTION TYPE DISTRIBUTION
+────────────────────────────────────────
+  P2P           52.3%  (benchmark: 52%)
+  P2M           30.8%  (benchmark: 31%)
+  BILL           9.9%  (benchmark: 10%)
+  RECHARGE       6.9%  (benchmark: 7%)
+
+────────────────────────────────────────
+4. PEAK HOUR ANALYSIS
+────────────────────────────────────────
+  Morning peak (8-10h):  14.4%  (benchmark: ~20%)
+  Evening peak (18-21h): 20.1%  (benchmark: ~30%)
+  Status:     ✓ Peak hours
+
+────────────────────────────────────────
+5. FRAUD TYPE BREAKDOWN
+────────────────────────────────────────
+  vishing                 30.8%  (target: 28%)
+  social_engineering      26.4%  (target: 24%)
+  account_takeover        19.8%  (target: 18%)
+  qr_scam                  9.9%  (target: 9%)
+  fake_app                 6.6%  (target: 6%)
+  money_mule               6.5%  (target: 15%)
+
+────────────────────────────────────────
+6. FRAUD SIGNAL VERIFICATION
+────────────────────────────────────────
+  ATO device_changed rate:    100%  (expected: ~100%)
+  Vishing median amount ratio: 201.7x  (expected: >3x)
+  Fake app legitimate rate:   0%  (expected: 0%)
+  Mule ring_id populated:     100%  (expected: ~100%)
+
+────────────────────────────────────────
+7. ML READINESS
+────────────────────────────────────────
+  amount                         ✓
+  is_fraud                       ✓
+  transaction_type               ✓
+  hour_of_day                    ✓
+  sender_user_id                 ✓
+  receiver_id                    ✓
+
+  Total features: 49
+  Numeric features: 18
+
+────────────────────────────────────────
+8. DATASET SUMMARY
+────────────────────────────────────────
+  Total transactions:    500,000
+  Fraud transactions:    3,636
+  Normal transactions:   496,364
+  Unique senders:        49,999
+  Unique receivers:      48,185
+  Date range:            2024-10-01 00:00:45 to 2024-12-29 23:59:56
+  Total columns:         49
+  User profiles:         50,000
+  Merchant profiles:     5,000
+  Mule rings:            23
+
+=================================================================
+  Validation complete. Dataset ready for ML training.
+=================================================================

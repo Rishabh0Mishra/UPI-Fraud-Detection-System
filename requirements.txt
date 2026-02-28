@@ -1,0 +1,15 @@
+lightgbm
+scikit-learn
+pandas
+numpy
+pyarrow
+fastapi
+uvicorn
+pydantic
+imbalanced-learn
+networkx
+python-louvain
+shap
+matplotlib
+redis
+joblib

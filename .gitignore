@@ -1,0 +1,37 @@
+# ── Data files (too large for GitHub) ──
+data/*.csv
+data/*.parquet
+data/*.pkl
+
+# ── Model binaries ──
+models/*.pkl
+models/*.parquet
+
+# ── Node modules ──
+node_modules/
+graphfraud-ui/node_modules/
+
+# ── Build output ──
+graphfraud-ui/dist/
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Environment ──
+.env
+.env.local

@@ -1,0 +1,23 @@
+{
+  "lgbm_weight": 0.75,
+  "graph_weight": 0.25,
+  "block_threshold": 0.00015091907366184424,
+  "review_threshold": 7.545953683092212e-05,
+  "hard_block_rules": [
+    "sender_is_known_controller",
+    "intra_ring_transfer",
+    "receiver_is_fake_merchant",
+    "extreme_amount_ratio"
+  ],
+  "extreme_amount_ratio_limit": 50,
+  "calibrator_coef": 25.87230285782775,
+  "calibrator_intercept": -14.105928375276594,
+  "eval_metrics": {
+    "calibrated_pr_auc": 0.25534846895752233,
+    "calibrated_roc_auc": 0.9898673347855129,
+    "fraud_blocked": 3636,
+    "fraud_reviewed": 0,
+    "fraud_missed": 0,
+    "total_fraud": 3636
+  }
+}
