@@ -8,7 +8,7 @@ import { CheckCircle, XCircle, Server, Cpu } from 'lucide-react'
 
 export default function SystemHealth() {
     const { data: health, isLoading: hLoading, error: hError, refetch: hRefetch } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: HEALTH_REFRESH_MS })
-    const { data: stats, isLoading: sLoading, refetch: sRefetch } = useQuery({ queryKey: ['stats'], queryFn: getStats, refetchInterval: STATS_REFRESH_MS })
+    const { data: stats, isLoading: sLoading } = useQuery({ queryKey: ['stats'], queryFn: getStats, refetchInterval: STATS_REFRESH_MS })
 
     if (hLoading || sLoading) return <LoadingSpinner text="Checking system health..." />
     if (hError) return <ErrorBanner message={hError.message} onRetry={hRefetch} />

@@ -5,7 +5,7 @@ import { useToast } from '../components/common/ToastNotification'
 import DecisionBadge from '../components/common/DecisionBadge'
 import FraudScoreBar from '../components/common/FraudScoreBar'
 import { Zap, RefreshCw, Copy, Download, Flag, ChevronDown, ChevronUp, Loader2, AlertTriangle, Clock } from 'lucide-react'
-import { formatDistanceToNow, format } from 'date-fns'
+
 
 const INITIAL_FORM = {
     transaction_id: '', sender_user_id: '', receiver_id: '', amount: '',

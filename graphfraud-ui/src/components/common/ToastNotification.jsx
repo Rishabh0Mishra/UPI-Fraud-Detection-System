@@ -1,7 +1,8 @@
-import { useState, useEffect, createContext, useContext, useCallback } from 'react'
+import { useState, createContext, useContext, useCallback } from 'react'
 import { Check, X, AlertTriangle } from 'lucide-react'
 
 const ToastContext = createContext()
+// eslint-disable-next-line react-refresh/only-export-components
 export const useToast = () => useContext(ToastContext)
 
 export function ToastProvider({ children }) {

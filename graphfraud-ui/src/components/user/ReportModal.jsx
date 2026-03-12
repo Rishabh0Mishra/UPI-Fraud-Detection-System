@@ -1,18 +1,23 @@
 import { useState } from 'react'
 import { X, ExternalLink, CheckCircle } from 'lucide-react'
+import { addReportedItem } from '../../utils/fraudAnalysis'
 
 export default function ReportModal({ item, onClose }) {
     const [description, setDescription] = useState('')
     const [phone, setPhone] = useState('')
     const [email, setEmail] = useState('')
     const [submitted, setSubmitted] = useState(false)
+    const [refCode, setRefCode] = useState('')
 
     const handleSubmit = () => {
-        const refCode = `RPT-${Date.now().toString(36).toUpperCase()}`
-        const report = { id: Date.now(), item: item?.item || '', type: item?.type || '', risk: item?.risk || 0, description, timestamp: new Date().toISOString(), refCode }
+        const code = `RPT-${Date.now().toString(36).toUpperCase()}`
+        const report = { id: Date.now(), item: item?.item || '', type: item?.type || '', risk: item?.risk || 0, description, timestamp: new Date().toISOString(), refCode: code }
         const existing = JSON.parse(localStorage.getItem('fraud_reports') || '[]')
         existing.push(report)
         localStorage.setItem('fraud_reports', JSON.stringify(existing))
+        // Add to blacklist so re-scanning immediately flags it
+        if (item?.item) addReportedItem(item.item, item.type || 'Unknown')
+        setRefCode(code)
         setSubmitted(true)
     }
 
@@ -24,7 +29,7 @@ export default function ReportModal({ item, onClose }) {
                         <CheckCircle size={44} style={{ color: 'var(--accent-green)', marginBottom: 12 }} />
                         <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Report Submitted</h3>
                         <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 4 }}>Our team will investigate this item.</p>
-                        <p className="mono" style={{ color: 'var(--accent-cyan)', fontSize: 13, marginBottom: 20 }}>Reference: {`RPT-${Date.now().toString(36).toUpperCase()}`}</p>
+                        <p className="mono" style={{ color: 'var(--accent-cyan)', fontSize: 13, marginBottom: 20 }}>Reference: {refCode}</p>
                         <a href="tel:1930" className="btn-primary" style={{ display: 'inline-flex', borderRadius: 12, padding: '12px 24px', textDecoration: 'none', fontSize: 15, marginBottom: 12 }}>📞 Call 1930 Now</a>
                         <br />
                         <button onClick={onClose} className="btn-secondary" style={{ borderRadius: 10, marginTop: 8 }}>Close</button>

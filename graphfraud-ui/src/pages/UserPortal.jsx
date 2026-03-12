@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Shield, Camera, Link2, UserCheck, Receipt, ListChecks, Search, FileText } from 'lucide-react'
 import { detectInputType } from '../utils/checkTypeDetector'
 import QRChecker from '../components/user/QRChecker'
@@ -20,15 +20,10 @@ export default function UserPortal() {
     const [activeTab, setActiveTab] = useState('qr')
     const [searchText, setSearchText] = useState('')
     const [reportModal, setReportModal] = useState(null)
-    const [pastReportCount, setPastReportCount] = useState(0)
     const [showPastReports, setShowPastReports] = useState(false)
-    const [pastReports, setPastReports] = useState([])
-
-    useEffect(() => {
-        const stored = JSON.parse(localStorage.getItem('fraud_reports') || '[]')
-        setPastReportCount(stored.length)
-        setPastReports(stored)
-    }, [reportModal])
+    const getStoredReports = () => JSON.parse(localStorage.getItem('fraud_reports') || '[]')
+    const [pastReports, setPastReports] = useState(getStoredReports)
+    const pastReportCount = pastReports.length
 
     const handleUniversalSearch = () => {
         const v = searchText.trim()
@@ -44,7 +39,11 @@ export default function UserPortal() {
     }
 
     const openReport = (item) => setReportModal(item)
-    const closeReport = () => setReportModal(null)
+    const closeReport = () => {
+        setReportModal(null)
+        // Refresh past reports after modal closes (new report may have been saved)
+        setPastReports(getStoredReports())
+    }
 
     return (
         <div style={{ minHeight: 'calc(100vh - 80px)', display: 'flex', justifyContent: 'center', paddingTop: 24, paddingBottom: 60 }}>

@@ -231,24 +231,28 @@ export default function RingExplorer() {
                     </div>
 
                     <div className="section-header">Members</div>
-                    <div className="space-y-2">
-                        {selectedRingData.all_members.map((m) => {
+                    {(() => {
+                        // Pre-compute deterministic risk scores based on member ID
+                        const memberRisks = selectedRingData.all_members.map((m) => {
                             const isCtrl = m === selectedRingData.controller
-                            const risk = isCtrl ? 0.92 : 0.4 + Math.random() * 0.35
-                            return (
-                                <div key={m} className="flex items-center gap-2 p-2 rounded" style={{ background: 'var(--bg-elevated)' }}>
-                                    {isCtrl && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,59,92,0.15)', color: '#FF3B5C', fontSize: 9 }}>CTRL</span>}
-                                    <span className="mono text-xs flex-1">{m}</span>
-                                    <div style={{ width: 50 }}>
-                                        <div className="rounded-full overflow-hidden" style={{ height: 4, background: 'rgba(255,255,255,0.06)' }}>
-                                            <div className="rounded-full" style={{ width: `${risk * 100}%`, height: '100%', background: risk > 0.7 ? '#FF3B5C' : '#FFB020' }} />
-                                        </div>
+                            // Use a hash-like score from the member ID for determinism
+                            const hash = m.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+                            const risk = isCtrl ? 0.92 : 0.4 + (hash % 35) / 100
+                            return { m, isCtrl, risk }
+                        })
+                        return memberRisks.map(({ m, isCtrl, risk }) => (
+                            <div key={m} className="flex items-center gap-2 p-2 rounded" style={{ background: 'var(--bg-elevated)' }}>
+                                {isCtrl && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,59,92,0.15)', color: '#FF3B5C', fontSize: 9 }}>CTRL</span>}
+                                <span className="mono text-xs flex-1">{m}</span>
+                                <div style={{ width: 50 }}>
+                                    <div className="rounded-full overflow-hidden" style={{ height: 4, background: 'rgba(255,255,255,0.06)' }}>
+                                        <div className="rounded-full" style={{ width: `${risk * 100}%`, height: '100%', background: risk > 0.7 ? '#FF3B5C' : '#FFB020' }} />
                                     </div>
-                                    <span className="mono text-xs" style={{ color: 'var(--text-muted)', width: 28 }}>{risk.toFixed(2)}</span>
                                 </div>
-                            )
-                        })}
-                    </div>
+                                <span className="mono text-xs" style={{ color: 'var(--text-muted)', width: 28 }}>{risk.toFixed(2)}</span>
+                            </div>
+                        ))
+                    })()}
 
                     <button onClick={exportCSV} className="btn-secondary text-xs w-full mt-4"><Download size={14} /> Export Ring Members</button>
                 </div>

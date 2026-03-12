@@ -32,7 +32,7 @@ export default function Dashboard() {
     if (isLoading) return <LoadingSpinner text="Loading dashboard..." />
     if (error) return <ErrorBanner message={error.message} onRetry={refetch} />
 
-    const sparkline = (base) => Array.from({ length: 12 }, (_, i) => ({ v: base + Math.floor(Math.random() * base * 0.3) }))
+    const sparkline = (base) => Array.from({ length: 12 }, () => ({ v: base + Math.floor(Math.random() * base * 0.3) }))
 
     return (
         <div className="space-y-6">

@@ -12,11 +12,12 @@ export default function LinkChecker({ onReport }) {
 
     if (result) {
         const rs = result.riskScore
+        const isPreviouslyReported = result._previouslyReported
         const isSafe = rs < 30, isWarn = rs >= 30 && rs < 60
         const borderColor = isSafe ? 'rgba(0,229,160,0.3)' : isWarn ? 'rgba(255,176,32,0.3)' : 'rgba(255,59,92,0.4)'
         const glowColor = isSafe ? 'rgba(0,229,160,0.06)' : isWarn ? 'rgba(255,176,32,0.06)' : 'rgba(255,59,92,0.08)'
         const headerColor = isSafe ? '#00E5A0' : isWarn ? '#FFB020' : '#FF3B5C'
-        const headerText = isSafe ? '✅  Link Looks Safe' : isWarn ? '⚠️  Link Has Warning Signs' : '🚨  DANGEROUS LINK — DO NOT VISIT'
+        const headerText = isPreviouslyReported ? '🚫  KNOWN FRAUD — PREVIOUSLY REPORTED' : isSafe ? '✅  Link Looks Safe' : isWarn ? '⚠️  Link Has Warning Signs' : '🚨  DANGEROUS LINK — DO NOT VISIT'
 
         return (
             <div className="fade-in" style={{ background: glowColor, border: `1px solid ${borderColor}`, borderRadius: 20, padding: 32 }}>

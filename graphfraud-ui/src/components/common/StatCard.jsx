@@ -1,10 +1,8 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { LineChart, Line, ResponsiveContainer } from 'recharts'
 
 export default function StatCard({ title, value, subtitle, color = 'var(--accent-cyan)', icon: Icon, sparklineData }) {
     const [displayVal, setDisplayVal] = useState(0)
-    const targetRef = useRef(value)
-    targetRef.current = value
 
     useEffect(() => {
         const target = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.]/g, '')) || 0

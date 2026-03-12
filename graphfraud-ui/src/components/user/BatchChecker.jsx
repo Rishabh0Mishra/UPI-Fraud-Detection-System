@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Loader2, ChevronDown, ChevronUp, Download } from 'lucide-react'
 import { detectInputType, TYPE_LABELS } from '../../utils/checkTypeDetector'
 import { analyseQRContent, analyseLink, analyseUPIId, generateTextReport } from '../../utils/fraudAnalysis'

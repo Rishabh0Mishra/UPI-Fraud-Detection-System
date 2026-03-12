@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getHealth } from '../api/fraudApi'
 import { useToast } from '../components/common/ToastNotification'
@@ -14,7 +14,7 @@ const DEFAULT_RULES = [
 ]
 
 export default function AdminPanel() {
-    const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth })
+    useQuery({ queryKey: ['health'], queryFn: getHealth })
     const { showToast } = useToast()
 
     const [thresholds, setThresholds] = useState(() => {

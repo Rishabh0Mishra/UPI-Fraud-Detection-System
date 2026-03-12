@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
 
 export default function FraudScoreBar({ score, width = '100%', showLabel = true, animated = true, height = 8 }) {
-    const [fill, setFill] = useState(0)
+    const [fill, setFill] = useState(animated ? 0 : score)
 
     useEffect(() => {
         if (animated) {
             const t = setTimeout(() => setFill(score), 50)
             return () => clearTimeout(t)
-        } else {
-            setFill(score)
         }
     }, [score, animated])
+
+    // Sync non-animated score changes without effect
+    const displayFill = animated ? fill : score
 
     const getColor = (s) => {
         if (s >= 0.8) return 'var(--accent-red)'
@@ -27,7 +28,7 @@ export default function FraudScoreBar({ score, width = '100%', showLabel = true,
                 <div
                     className="rounded-full"
                     style={{
-                        width: `${fill * 100}%`,
+                        width: `${displayFill * 100}%`,
                         height: '100%',
                         background: getColor(score),
                         transition: animated ? 'width 0.8s ease-out' : 'none',

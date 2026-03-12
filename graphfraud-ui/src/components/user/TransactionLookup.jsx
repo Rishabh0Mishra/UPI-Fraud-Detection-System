@@ -90,6 +90,7 @@ export default function TransactionLookup({ onReport }) {
                             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                                 <a href="tel:1930" className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, textDecoration: 'none', justifyContent: 'center', minWidth: 140 }}>🚨 Report Fraud — Call 1930</a>
                                 <a href="https://cybercrime.gov.in" target="_blank" rel="noopener" className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, textDecoration: 'none', justifyContent: 'center', minWidth: 140 }}>🌐 cybercrime.gov.in</a>
+                                <button onClick={() => onReport?.({ item: result.transaction_id, type: 'Transaction', risk: 90 })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>🚨 Report This Transaction</button>
                             </div>
                         </>
                     )}

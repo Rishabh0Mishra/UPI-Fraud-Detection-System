@@ -96,11 +96,12 @@ export default function QRChecker({ onReport }) {
 
     if (result) {
         const rs = result.riskScore
+        const isPreviouslyReported = result._previouslyReported
         const isSafe = rs < 30, isWarn = rs >= 30 && rs < 60
         const borderColor = isSafe ? 'rgba(0,229,160,0.3)' : isWarn ? 'rgba(255,176,32,0.3)' : 'rgba(255,59,92,0.4)'
         const glowColor = isSafe ? 'rgba(0,229,160,0.06)' : isWarn ? 'rgba(255,176,32,0.06)' : 'rgba(255,59,92,0.08)'
         const headerColor = isSafe ? '#00E5A0' : isWarn ? '#FFB020' : '#FF3B5C'
-        const headerText = isSafe ? '✅  QR Code Looks Safe' : isWarn ? '⚠️  Proceed With Caution' : '🚨  HIGH FRAUD RISK — DO NOT PAY'
+        const headerText = isPreviouslyReported ? '🚫  KNOWN FRAUD — PREVIOUSLY REPORTED' : isSafe ? '✅  QR Code Looks Safe' : isWarn ? '⚠️  Proceed With Caution' : '🚨  HIGH FRAUD RISK — DO NOT PAY'
 
         return (
             <div className="fade-in" style={{ background: glowColor, border: `1px solid ${borderColor}`, borderRadius: 20, padding: 32, ...(rs > 60 ? { animation: 'blockFlash 2s ease-in-out infinite' } : {}) }}>

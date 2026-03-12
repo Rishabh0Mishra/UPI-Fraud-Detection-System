@@ -2,21 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { getHealth } from '../../api/fraudApi'
 import { HEALTH_REFRESH_MS } from '../../config'
 import { Bell, Shield } from 'lucide-react'
-import { useState, useEffect } from 'react'
 
 export default function TopBar() {
     const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: HEALTH_REFRESH_MS })
-    const [uptime, setUptime] = useState(0)
     const isHealthy = health?.status === 'healthy' || health?.model_loaded
-
-    useEffect(() => {
-        if (health?.uptime_seconds) setUptime(Math.floor(health.uptime_seconds))
-    }, [health])
-
-    useEffect(() => {
-        const t = setInterval(() => setUptime((u) => u + 1), 1000)
-        return () => clearInterval(t)
-    }, [])
+    const uptime = health?.uptime_seconds ? Math.floor(health.uptime_seconds) : 0
 
     const formatUptime = (s) => {
         const h = Math.floor(s / 3600)
@@ -32,7 +22,7 @@ export default function TopBar() {
         >
             <div className="flex items-center gap-3">
                 <span className="text-lg font-bold">
-                    GraphFraud<span style={{ color: 'var(--accent-cyan)' }}>-UPI</span>
+                    UPI <span style={{ color: 'var(--accent-cyan)' }}>Fraud Detection</span> System
                 </span>
             </div>
 

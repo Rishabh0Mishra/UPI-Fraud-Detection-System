@@ -3,6 +3,32 @@
  * All checks run entirely in the browser — no backend calls needed.
  */
 import { FRAUD_RINGS } from '../api/mockData'
+import { KNOWN_FRAUD_DOMAINS } from '../data/knownFraudDomains'
+
+/* ── Reported Items Blacklist (persisted in localStorage) ── */
+const REPORTED_ITEMS_KEY = 'reported_fraud_items'
+
+export const getReportedItems = () => {
+    try {
+        return JSON.parse(localStorage.getItem(REPORTED_ITEMS_KEY) || '[]')
+    } catch {
+        return []
+    }
+}
+
+export const addReportedItem = (item, type) => {
+    const items = getReportedItems()
+    const normalised = item.toLowerCase().trim()
+    if (!items.some((r) => r.item === normalised)) {
+        items.push({ item: normalised, type, reportedAt: new Date().toISOString() })
+        localStorage.setItem(REPORTED_ITEMS_KEY, JSON.stringify(items))
+    }
+}
+
+export const isItemReported = (item) => {
+    const normalised = item.toLowerCase().trim()
+    return getReportedItems().find((r) => r.item === normalised) || null
+}
 
 /* ── Bank handle registry ── */
 const VERIFIED_HANDLES = {
@@ -180,6 +206,22 @@ export const analyseQRContent = (rawText) => {
     const signals = []
     let riskScore = 0
 
+    // CHECK 0: Previously reported QR code — immediate block
+    const reportMatch = isItemReported(rawText)
+    if (reportMatch) {
+        return {
+            pa: '', pn: '', am: 0,
+            riskScore: 100,
+            signals: [
+                { level: 'danger', text: '🚫 This QR code was previously reported as FRAUDULENT' },
+                { level: 'danger', text: `Reported on: ${new Date(reportMatch.reportedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}` },
+                { level: 'danger', text: 'Do NOT proceed — this is a confirmed scam QR code in our records' },
+            ],
+            rawText,
+            _previouslyReported: true,
+        }
+    }
+
     const isUPILink = rawText.startsWith('upi://')
     const isHTTPLink = rawText.startsWith('http')
 
@@ -306,6 +348,7 @@ export const analyseQRContent = (rawText) => {
 export const analyseLink = (url) => {
     const signals = []
     let riskScore = 0
+    let isLegitimate = false
 
     let parsedURL
     try {
@@ -318,19 +361,49 @@ export const analyseLink = (url) => {
 
     const domain = parsedURL.hostname
     const path = parsedURL.pathname + parsedURL.search
+    const fullUrl = domain + path
+
+    // CHECK 0: Previously reported link — immediate block
+    const reportMatch = isItemReported(url)
+    if (reportMatch) {
+        return {
+            url, domain,
+            riskScore: 100,
+            signals: [
+                { level: 'danger', text: '🚫 This link was previously reported as FRAUDULENT' },
+                { level: 'danger', text: `Reported on: ${new Date(reportMatch.reportedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}` },
+                { level: 'danger', text: 'Do NOT visit this link — it is a confirmed scam in our records' },
+            ],
+            isHTTPS: parsedURL.protocol === 'https:',
+            _previouslyReported: true,
+        }
+    }
+
+    // CHECK 0b: Known fraud domain from dataset (293K records)
+    const domainNorm = domain.toLowerCase()
+    if (KNOWN_FRAUD_DOMAINS.has(domainNorm)) {
+        signals.push({
+            level: 'danger',
+            text: `Domain "${domain}" found in known fraud database (trained from 293K+ records)`,
+        })
+        riskScore += 85
+    }
 
     // CHECK 1: Known legitimate UPI domains
     const legitimateDomains = [
         'phonepe.com', 'gpay.app', 'paytm.com', 'bhimupi.org.in',
         'npci.org.in', 'upi.npci.org.in', 'amazon.in', 'flipkart.com',
         'hdfcbank.com', 'onlinesbi.sbi', 'axisbank.com', 'icicibank.com',
+        'google.com', 'google.co.in', 'facebook.com', 'youtube.com',
+        'github.com', 'wikipedia.org', 'microsoft.com', 'apple.com',
     ]
     if (legitimateDomains.some((d) => domain.endsWith(d))) {
         signals.push({ level: 'safe', text: `Domain "${domain}" is a verified legitimate service` })
+        isLegitimate = true
         riskScore -= 20
     }
 
-    // CHECK 2: Phishing keyword patterns in domain
+    // CHECK 2: Phishing keyword patterns in domain + path
     const phishingDomainPatterns = [
         /sbi.*(refund|helpdesk|support|verify|kyc|block|claim)/i,
         /hdfc.*(refund|helpdesk|reward|prize)/i,
@@ -339,9 +412,11 @@ export const analyseLink = (url) => {
         /rbi.*(refund|penalty|fine|block|verify)/i,
         /(prize|reward|cashback|lottery|winner|lucky).*(upi|pay|claim)/i,
         /paytm.*(helpdesk|refund).*/i,
+        /(bank|payment).*(verify|update|suspend|block|expire)/i,
+        /(verify|update|suspend|block|expire).*(bank|payment|account|upi)/i,
     ]
     phishingDomainPatterns.forEach((pattern) => {
-        if (pattern.test(domain + path)) {
+        if (pattern.test(fullUrl)) {
             signals.push({
                 level: 'danger',
                 text: `Domain pattern matches known phishing format: "${domain}"`,
@@ -356,6 +431,10 @@ export const analyseLink = (url) => {
         paytm: ['pay-tm', 'paytm-refund', 'p4ytm', 'payytm'],
         gpay: ['g-pay', 'googlepay-india', 'gpay-reward'],
         npci: ['npci-helpdesk', 'npc1', 'npci.in.net'],
+        sbi: ['sbi-online', 'sbi-refund', 'onlinesbi-in', 'sbicard-helpdesk'],
+        hdfc: ['hdfc-helpdesk', 'hdfcbank-refund', 'hdfc-online'],
+        icici: ['icici-helpdesk', 'icicibank-refund'],
+        axis: ['axis-helpdesk', 'axisbank-refund'],
     }
     Object.entries(mimikedBrands).forEach(([brand, fakes]) => {
         if (fakes.some((f) => domain.includes(f))) {
@@ -368,7 +447,7 @@ export const analyseLink = (url) => {
     })
 
     // CHECK 4: Suspicious TLDs
-    const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.click', '.link', '.info']
+    const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.click', '.link', '.info', '.buzz', '.pro', '.work', '.site', '.online', '.live', '.icu', '.club']
     if (suspiciousTLDs.some((tld) => domain.endsWith(tld))) {
         signals.push({
             level: 'warning',
@@ -377,7 +456,54 @@ export const analyseLink = (url) => {
         riskScore += 30
     }
 
-    // CHECK 5: UPI parameters in URL
+    // CHECK 5: Generic phishing keywords in domain
+    const domainPhishingKeywords = [
+        'refund', 'helpdesk', 'support', 'verify', 'kyc', 'claim',
+        'reward', 'prize', 'cashback', 'lottery', 'winner', 'lucky',
+        'free', 'offer', 'urgent', 'update', 'suspend', 'block',
+        'expire', 'secure', 'authenticate', 'confirm', 'validate',
+        'login', 'signin', 'password', 'otp', 'pin',
+    ]
+    const domainLower = domain.toLowerCase()
+    const matchedDomainKeywords = domainPhishingKeywords.filter((kw) => domainLower.includes(kw))
+    if (!isLegitimate && matchedDomainKeywords.length > 0) {
+        signals.push({
+            level: 'danger',
+            text: `Domain contains suspicious keyword${matchedDomainKeywords.length > 1 ? 's' : ''}: "${matchedDomainKeywords.join('", "')}" — this is a common phishing tactic`,
+        })
+        riskScore += Math.min(matchedDomainKeywords.length * 25, 70)
+    }
+
+    // CHECK 6: Suspicious keywords in URL path
+    const pathPhishingKeywords = [
+        'login', 'signin', 'verify', 'kyc', 'update', 'confirm',
+        'secure', 'otp', 'pin', 'password', 'claim', 'refund',
+        'reward', 'prize', 'winner', 'cashback',
+    ]
+    const pathLower = path.toLowerCase()
+    const matchedPathKeywords = pathPhishingKeywords.filter((kw) => pathLower.includes(kw))
+    if (!isLegitimate && matchedPathKeywords.length > 0) {
+        signals.push({
+            level: 'warning',
+            text: `URL path contains suspicious keyword${matchedPathKeywords.length > 1 ? 's' : ''}: "${matchedPathKeywords.join('", "')}"`,
+        })
+        riskScore += Math.min(matchedPathKeywords.length * 15, 45)
+    }
+
+    // CHECK 7: Brand name + suspicious word combination in domain
+    const brandNames = ['sbi', 'hdfc', 'icici', 'axis', 'kotak', 'paytm', 'phonepe', 'gpay', 'npci', 'rbi', 'uidai', 'aadhar']
+    const suspiciousModifiers = ['refund', 'helpdesk', 'support', 'verify', 'claim', 'update', 'secure', 'login', 'kyc']
+    const hasBrand = brandNames.some((b) => domainLower.includes(b))
+    const hasModifier = suspiciousModifiers.some((m) => domainLower.includes(m))
+    if (!isLegitimate && hasBrand && hasModifier) {
+        signals.push({
+            level: 'danger',
+            text: `Domain combines a bank/payment brand name with suspicious words — this is a classic phishing URL`,
+        })
+        riskScore += 50
+    }
+
+    // CHECK 8: UPI parameters in URL
     if (path.includes('pa=') || path.includes('upi=')) {
         const extractedPA = new URLSearchParams(parsedURL.search).get('pa') || ''
         signals.push({
@@ -392,7 +518,7 @@ export const analyseLink = (url) => {
         }
     }
 
-    // CHECK 6: URL shorteners
+    // CHECK 9: URL shorteners
     const shorteners = ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'cutt.ly', 'rb.gy', 'shorturl.at', 'is.gd', 'ow.ly']
     if (shorteners.some((s) => domain.includes(s))) {
         signals.push({
@@ -402,7 +528,7 @@ export const analyseLink = (url) => {
         riskScore += 20
     }
 
-    // CHECK 7: HTTP (not HTTPS)
+    // CHECK 10: HTTP (not HTTPS)
     if (parsedURL.protocol === 'http:') {
         signals.push({
             level: 'warning',
@@ -411,7 +537,7 @@ export const analyseLink = (url) => {
         riskScore += 15
     }
 
-    // CHECK 8: Excessive subdomains
+    // CHECK 11: Excessive subdomains
     const subdomainCount = domain.split('.').length - 2
     if (subdomainCount > 2) {
         signals.push({
@@ -419,6 +545,20 @@ export const analyseLink = (url) => {
             text: `Complex domain with ${subdomainCount} subdomains — often used to appear official while hiding the real domain`,
         })
         riskScore += 25
+    }
+
+    // CHECK 12: Non-legitimate domain baseline — unknown domains start with some suspicion
+    if (!isLegitimate && riskScore < 15) {
+        signals.push({
+            level: 'info',
+            text: `Domain "${domain}" is not in our verified list — exercise caution before entering any information`,
+        })
+        riskScore += 15
+    }
+
+    // If no signals at all and not legitimate, flag as unknown
+    if (signals.length === 0) {
+        signals.push({ level: 'info', text: 'No specific threats detected, but always verify links before clicking' })
     }
 
     return {
@@ -452,7 +592,7 @@ export const translateReason = (reason) => {
    ═══════════════════════════════════════════════════════════════ */
 export const generateTextReport = (results) => {
     const lines = [
-        'GraphFraud-UPI Batch Check Report',
+        'UPI Fraud Detection System — Batch Check Report',
         `Generated: ${new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'medium' })}`,
         'Checked by: Anonymous User',
         '',
