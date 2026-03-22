@@ -35,3 +35,6 @@ Thumbs.db
 # ── Environment ──
 .env
 .env.local
+
+# ── Demo videos ──
+demo-videos/
