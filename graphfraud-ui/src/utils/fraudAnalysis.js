@@ -4,6 +4,7 @@
  */
 import { FRAUD_RINGS } from '../api/mockData'
 import { KNOWN_FRAUD_DOMAINS } from '../data/knownFraudDomains'
+import { API_BASE_URL } from '../config'
 
 /* ── Reported Items Blacklist (persisted in localStorage) ── */
 const REPORTED_ITEMS_KEY = 'reported_fraud_items'
@@ -112,26 +113,169 @@ export const checkRingMembership = (upiId) => {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   UPI ID ANALYSIS
+   STRICT UPI FORMAT VALIDATION (client-side mirror of backend)
+   ═══════════════════════════════════════════════════════════════ */
+
+export const validateUPIFormat = (upiId) => {
+    const result = { isValid: false, username: null, handle: null, errorType: null, errorMessage: null }
+
+    if (!upiId || typeof upiId !== 'string') {
+        result.errorType = 'EMPTY_INPUT'
+        result.errorMessage = '❌ Invalid UPI ID Format\n\nNo UPI ID provided.'
+        return result
+    }
+
+    if (upiId !== upiId.trim()) {
+        result.errorType = 'WHITESPACE'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nThe UPI ID "${upiId}" contains leading or trailing spaces.\n\nValid format: username@handle\nExample: merchant@paytm`
+        return result
+    }
+
+    if (upiId.includes(' ')) {
+        result.errorType = 'SPACE_IN_MIDDLE'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nThe UPI ID "${upiId}" contains spaces.\n\nValid format: username@handle\nExample: merchant@paytm`
+        return result
+    }
+
+    const atCount = (upiId.match(/@/g) || []).length
+    if (atCount === 0) {
+        result.errorType = 'NO_AT_SYMBOL'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nThe UPI ID "${upiId}" is missing the @ symbol.\n\nValid format: username@handle\nExample: merchant@paytm`
+        return result
+    }
+
+    if (atCount > 1) {
+        result.errorType = 'MULTIPLE_AT_SYMBOLS'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nThe UPI ID "${upiId}" contains multiple @ symbols.\n\nValid format: username@handle\nExample: merchant@paytm\n\nThis appears to be a fraudulent or malformed UPI ID.`
+        return result
+    }
+
+    const [username, handle] = upiId.split('@')
+
+    if (!username) {
+        result.errorType = 'MISSING_USERNAME'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nThe UPI ID "${upiId}" is missing the username.\n\nValid format: username@handle\nYour input only has: @${handle}\n\nPlease verify the correct UPI ID.`
+        return result
+    }
+
+    if (!handle) {
+        result.errorType = 'MISSING_HANDLE'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nThe UPI ID "${upiId}" is missing the handle.\n\nValid format: username@handle\nYour input only has: ${username}@\n\nPlease verify the correct UPI ID.`
+        return result
+    }
+
+    if (username.length < 3) {
+        result.errorType = 'USERNAME_TOO_SHORT'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nUsername must be at least 3 characters long.\n\nYour input: "${username}" (only ${username.length} characters)\n\nPlease verify the correct UPI ID.`
+        return result
+    }
+
+    if (!/^[a-zA-Z0-9._\-]+$/.test(username)) {
+        result.errorType = 'INVALID_USERNAME_CHARS'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nUsername "${username}" contains invalid characters.\n\nAllowed: letters, numbers, dots (.), underscores (_), hyphens (-)`
+        return result
+    }
+
+    if (/^[._\-]/.test(username) || /[._\-]$/.test(username)) {
+        result.errorType = 'USERNAME_SPECIAL_BOUNDARY'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nUsername "${username}" cannot start or end with special characters (., _, -).`
+        return result
+    }
+
+    if (handle.length < 2) {
+        result.errorType = 'HANDLE_TOO_SHORT'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nHandle must be at least 2 characters long.\n\nYour input: "@${handle}" (only ${handle.length} character)`
+        return result
+    }
+
+    if (!/^[a-zA-Z0-9]+$/.test(handle)) {
+        result.errorType = 'INVALID_HANDLE_CHARS'
+        result.errorMessage = `❌ Invalid UPI ID Format\n\nHandle "@${handle}" contains invalid characters. Handle must be alphanumeric only.`
+        return result
+    }
+
+    result.isValid = true
+    result.username = username
+    result.handle = handle.toLowerCase()
+    return result
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   FRAUD REPORT LOOKUP (calls backend API)
+   ═══════════════════════════════════════════════════════════════ */
+
+export const fetchFraudReports = async (identifier) => {
+    try {
+        const res = await fetch(`${API_BASE_URL}/check-reports/${encodeURIComponent(identifier)}`)
+        if (res.ok) return await res.json()
+    } catch (e) {
+        console.warn('Could not fetch fraud reports:', e)
+    }
+    return { found: false, report_count: 0, risk_adjustment: 0 }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   UPI ID ANALYSIS (with strict 3-step validation)
    ═══════════════════════════════════════════════════════════════ */
 export const analyseUPIId = (upiId) => {
     const signals = []
     let riskScore = 0
-    const upiLower = upiId.toLowerCase().trim()
-    const parts = upiLower.split('@')
-    const username = parts[0] || ''
-    const handle = parts[1] || ''
 
-    // CHECK 1: Format validation
-    if (!upiId.includes('@') || !handle) {
+    // ── STEP 1: Strict format validation ──
+    const fmt = validateUPIFormat(upiId)
+    if (!fmt.isValid) {
         return {
-            upiId, username, handle, bankName: 'Unknown',
+            upiId,
+            username: '',
+            handle: '',
+            bankName: 'Unknown',
             riskScore: 100,
-            signals: [{ level: 'danger', text: 'Invalid UPI ID format — must contain @' }],
+            formatError: fmt.errorType,
+            signals: [{ level: 'danger', text: fmt.errorMessage }],
         }
     }
 
-    // CHECK 2: Known fraud ring membership
+    const username = fmt.username
+    const handle = fmt.handle
+    const upiLower = upiId.toLowerCase().trim()
+
+    // ── STEP 2: Handle validation ──
+    if (!VERIFIED_HANDLES[handle]) {
+        signals.push({
+            level: 'danger',
+            text: `🚨 UPI handle "@${handle}" is NOT recognized by any known bank.\n\n✓ Valid handles: @paytm, @ybl, @oksbi, @okaxis, @okicici\n✗ Detected: @${handle}\n\nThis is likely a fraudulent UPI ID.`,
+        })
+        // Don't proceed to further checks — invalid handle = critical risk
+        return {
+            upiId,
+            username,
+            handle,
+            bankName: 'Unknown (INVALID)',
+            riskScore: 100,
+            handleError: true,
+            signals,
+        }
+    }
+
+    // Handle is valid — add safe signal
+    signals.push({
+        level: 'safe',
+        text: `Bank handle "@${handle}" is verified — issued by ${VERIFIED_HANDLES[handle]}`,
+    })
+
+    // ── STEP 3: Fraud report check (local blacklist) ──
+    const reportMatch = isItemReported(upiLower)
+    if (reportMatch) {
+        signals.push({
+            level: 'danger',
+            text: `🚫 This UPI ID was previously reported as FRAUDULENT (${new Date(reportMatch.reportedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })})`,
+        })
+        riskScore += 80
+    }
+
+    // CHECK: Known fraud ring membership
     const ringCheck = checkRingMembership(upiId)
     if (ringCheck.inRing) {
         signals.push({
@@ -148,7 +292,7 @@ export const analyseUPIId = (upiId) => {
         }
     }
 
-    // CHECK 3: Suspicious username patterns
+    // CHECK: Suspicious username patterns
     const suspiciousNames = [
         'refund', 'prize', 'reward', 'helpdesk', 'support',
         'kyc', 'verify', 'bank', 'rbi', 'npci', 'pm', 'govt', 'police',
@@ -165,22 +309,7 @@ export const analyseUPIId = (upiId) => {
         }
     })
 
-    // CHECK 4: Legitimate bank handles
-    if (VERIFIED_HANDLES[handle]) {
-        signals.push({
-            level: 'safe',
-            text: `Bank handle "@${handle}" is verified — issued by ${VERIFIED_HANDLES[handle]}`,
-        })
-        riskScore -= 10
-    } else {
-        signals.push({
-            level: 'warning',
-            text: `Unknown bank handle "@${handle}" — could not verify the issuing bank`,
-        })
-        riskScore += 20
-    }
-
-    // CHECK 5: Purely numeric username (possible mule)
+    // CHECK: Purely numeric username (possible mule)
     if (/^\d{8,}$/.test(username)) {
         signals.push({
             level: 'warning',
@@ -241,11 +370,13 @@ export const analyseQRContent = (rawText) => {
     const pn = params.get('pn') || ''
     const am = parseFloat(params.get('am') || '0')
 
-    // CHECK 1: UPI ID format validation
-    const upiPattern = /^[\w.\-_]+@[\w]+$/
-    if (pa && !upiPattern.test(pa)) {
-        signals.push({ level: 'danger', text: `Invalid UPI ID format: "${pa}"` })
-        riskScore += 40
+    // CHECK 1: UPI ID format validation (uses strict validator)
+    if (pa) {
+        const fmtCheck = validateUPIFormat(pa)
+        if (!fmtCheck.isValid) {
+            signals.push({ level: 'danger', text: `Invalid UPI ID format in QR: "${pa}" — ${fmtCheck.errorType}` })
+            riskScore += 40
+        }
     }
 
     // CHECK 2: Suspicious keywords
@@ -567,6 +698,58 @@ export const analyseLink = (url) => {
         riskScore: Math.min(Math.max(riskScore, 0), 100),
         signals,
         isHTTPS: parsedURL.protocol === 'https:',
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   NEW RISK UI CONFIG (TIERED SCALE)
+   ═══════════════════════════════════════════════════════════════ */
+export const getRiskUiConfig = (score) => {
+    if (score <= 25) {
+        return {
+            level: 'MINIMAL RISK',
+            color: '#4CAF50',
+            glowColor: 'rgba(76,175,80,0.06)',
+            borderColor: 'rgba(76,175,80,0.3)',
+            icon: 'ℹ️',
+            message: 'Minimal fraud indicators detected. Lower risk, but always verify.'
+        }
+    } else if (score <= 40) {
+        return {
+            level: 'LOW RISK',
+            color: '#2196F3',
+            glowColor: 'rgba(33,150,243,0.06)',
+            borderColor: 'rgba(33,150,243,0.3)',
+            icon: 'ℹ️',
+            message: 'Few warning signs, stay vigilant. Verify receiver details before paying.'
+        }
+    } else if (score <= 60) {
+        return {
+            level: 'MEDIUM RISK',
+            color: '#FF9800',
+            glowColor: 'rgba(255,152,0,0.06)',
+            borderColor: 'rgba(255,152,0,0.3)',
+            icon: '⚠️',
+            message: 'Appears legitimate, but confirm details. Proceed with caution.'
+        }
+    } else if (score <= 80) {
+        return {
+            level: 'HIGH RISK',
+            color: '#FF5722',
+            glowColor: 'rgba(255,87,34,0.08)',
+            borderColor: 'rgba(255,87,34,0.4)',
+            icon: '🚨',
+            message: 'STRONG FRAUD INDICATORS DETECTED! We strongly recommend NOT proceeding.'
+        }
+    } else {
+        return {
+            level: 'CRITICAL RISK',
+            color: '#D32F2F',
+            glowColor: 'rgba(211,47,47,0.1)',
+            borderColor: 'rgba(211,47,47,0.5)',
+            icon: '🛑',
+            message: 'CONFIRMED FRAUD DETECTED! Do NOT proceed. This is a confirmed scam.'
+        }
     }
 }
 

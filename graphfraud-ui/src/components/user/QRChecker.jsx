@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Camera, Upload, X, StopCircle } from 'lucide-react'
-import { analyseQRContent } from '../../utils/fraudAnalysis'
+import { analyseQRContent, getRiskUiConfig } from '../../utils/fraudAnalysis'
 import RiskGauge from '../common/RiskGauge'
 import SignalList from '../common/SignalList'
 
@@ -97,16 +97,16 @@ export default function QRChecker({ onReport }) {
     if (result) {
         const rs = result.riskScore
         const isPreviouslyReported = result._previouslyReported
-        const isSafe = rs < 30, isWarn = rs >= 30 && rs < 60
-        const borderColor = isSafe ? 'rgba(0,229,160,0.3)' : isWarn ? 'rgba(255,176,32,0.3)' : 'rgba(255,59,92,0.4)'
-        const glowColor = isSafe ? 'rgba(0,229,160,0.06)' : isWarn ? 'rgba(255,176,32,0.06)' : 'rgba(255,59,92,0.08)'
-        const headerColor = isSafe ? '#00E5A0' : isWarn ? '#FFB020' : '#FF3B5C'
-        const headerText = isPreviouslyReported ? '🚫  KNOWN FRAUD — PREVIOUSLY REPORTED' : isSafe ? '✅  QR Code Looks Safe' : isWarn ? '⚠️  Proceed With Caution' : '🚨  HIGH FRAUD RISK — DO NOT PAY'
+        const ui = getRiskUiConfig(rs)
 
         return (
-            <div className="fade-in" style={{ background: glowColor, border: `1px solid ${borderColor}`, borderRadius: 20, padding: 32, ...(rs > 60 ? { animation: 'blockFlash 2s ease-in-out infinite' } : {}) }}>
-                <h3 style={{ color: headerColor, fontSize: 20, fontWeight: 700, marginBottom: 6 }}>{headerText}</h3>
-                {rs >= 30 && <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16 }}>Risk Score: {rs}/100</p>}
+            <div className="fade-in" style={{ background: ui.glowColor, border: `1px solid ${ui.borderColor}`, borderRadius: 20, padding: 32, ...(rs > 60 ? { animation: 'blockFlash 2s ease-in-out infinite' } : {}) }}>
+                <h3 style={{ color: ui.color, fontSize: 20, fontWeight: 700, marginBottom: 6 }}>
+                    {isPreviouslyReported ? '🚫 KNOWN FRAUD' : `${ui.icon} ${ui.level}`}
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 16 }}>
+                    {isPreviouslyReported ? 'PREVIOUSLY REPORTED SCAM' : ui.message}
+                </p>
                 <div style={{ display: 'flex', justifyContent: 'center', margin: '16px 0' }}><RiskGauge score={rs} size={130} /></div>
                 {result.pa && (
                     <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
@@ -118,6 +118,22 @@ export default function QRChecker({ onReport }) {
                     </div>
                 )}
                 <SignalList signals={result.signals} />
+                {rs <= 40 && (
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginTop: 16 }}>
+                        <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>✓ VERIFICATION CHECKLIST:</p>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Before proceeding, confirm:</p>
+                        <ul style={{ color: 'var(--text-secondary)', fontSize: 13, paddingLeft: 18, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <li>I recognize this payee/merchant</li>
+                            <li>The payee name matches the business/person</li>
+                            <li>I initiated this transaction</li>
+                            <li>The amount is correct</li>
+                            <li>I trust this recipient</li>
+                        </ul>
+                        <p style={{ color: 'var(--accent-cyan)', fontSize: 13, marginTop: 12, fontWeight: 500 }}>
+                            ⚠️ Never pay based on phone calls or messages asking you to make "urgent" payments
+                        </p>
+                    </div>
+                )}
                 {rs > 60 && (
                     <div style={{ background: 'rgba(255,59,92,0.06)', border: '1px solid rgba(255,59,92,0.15)', borderRadius: 14, padding: 16, marginTop: 16 }}>
                         <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>What to do next:</p>
@@ -129,7 +145,9 @@ export default function QRChecker({ onReport }) {
                     </div>
                 )}
                 <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
-                    {rs > 30 && <button onClick={() => onReport?.({ item: result.pa || result.rawText, type: 'QR Code', risk: rs })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>🚨 Report This QR</button>}
+                    <button onClick={() => onReport?.({ item: result.pa || result.rawText, type: 'QR Code', risk: rs })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>
+                        {rs > 60 ? '🚨 Report to confirm' : rs > 30 ? '⚠️ Report as Suspicious' : 'ℹ️ Report if suspicious'}
+                    </button>
                     <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>Check Another</button>
                 </div>
             </div>

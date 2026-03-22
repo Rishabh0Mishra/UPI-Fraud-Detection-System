@@ -1,42 +1,119 @@
 import { useState } from 'react'
-import { analyseUPIId } from '../../utils/fraudAnalysis'
+import { analyseUPIId, getRiskUiConfig, fetchFraudReports } from '../../utils/fraudAnalysis'
 import RiskGauge from '../common/RiskGauge'
 import SignalList from '../common/SignalList'
 
 export default function UPIChecker({ onReport }) {
     const [upiId, setUpiId] = useState('')
     const [result, setResult] = useState(null)
+    const [reportData, setReportData] = useState(null)
+    const [loading, setLoading] = useState(false)
 
-    const handleCheck = () => { if (!upiId.trim()) return; setResult(analyseUPIId(upiId.trim())) }
-    const reset = () => { setResult(null); setUpiId('') }
+    const handleCheck = async () => {
+        if (!upiId.trim()) return
+        setLoading(true)
+        const analysisResult = analyseUPIId(upiId.trim())
+
+        // If format and handle passed, also check fraud reports from backend
+        if (!analysisResult.formatError && !analysisResult.handleError) {
+            try {
+                const reports = await fetchFraudReports(upiId.trim())
+                if (reports.found && reports.report_count > 0) {
+                    setReportData(reports)
+                    // Add report warning to signals
+                    analysisResult.signals.push({
+                        level: 'danger',
+                        text: `⚠️ This UPI ID has been reported ${reports.report_count} time(s) as fraudulent.\nConfirmed fraud: ${reports.confirmed_fraud_count || 0} | Total lost: ₹${(reports.total_amount_lost || 0).toLocaleString('en-IN')}`
+                    })
+                    // Add risk adjustment
+                    analysisResult.riskScore = Math.min(100, analysisResult.riskScore + (reports.risk_adjustment || 0))
+                }
+            } catch (e) {
+                console.warn('Report check failed:', e)
+            }
+        }
+
+        setResult(analysisResult)
+        setLoading(false)
+    }
+
+    const reset = () => { setResult(null); setUpiId(''); setReportData(null) }
 
     if (result) {
         const rs = result.riskScore
-        const isSafe = rs < 30, isWarn = rs >= 30 && rs < 60
-        const borderColor = isSafe ? 'rgba(0,229,160,0.3)' : isWarn ? 'rgba(255,176,32,0.3)' : 'rgba(255,59,92,0.4)'
-        const glowColor = isSafe ? 'rgba(0,229,160,0.06)' : isWarn ? 'rgba(255,176,32,0.06)' : 'rgba(255,59,92,0.08)'
-        const headerColor = isSafe ? '#00E5A0' : isWarn ? '#FFB020' : '#FF3B5C'
-        const headerText = isSafe ? '✅  UPI ID Looks Safe' : isWarn ? '⚠️  Suspicious UPI ID — Be Careful' : '🔴  CAUTION — DO NOT SEND MONEY'
+        const ui = getRiskUiConfig(rs)
+        const isFormatOrHandleError = result.formatError || result.handleError
 
         return (
-            <div className="fade-in" style={{ background: glowColor, border: `1px solid ${borderColor}`, borderRadius: 20, padding: 32 }}>
-                <h3 style={{ color: headerColor, fontSize: 20, fontWeight: 700, marginBottom: 16 }}>{headerText}</h3>
+            <div className="fade-in" style={{ background: ui.glowColor, border: `1px solid ${ui.borderColor}`, borderRadius: 20, padding: 32 }}>
+                <h3 style={{ color: ui.color, fontSize: 20, fontWeight: 700, marginBottom: 8 }}>{ui.icon}  {ui.level}</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 16 }}>{ui.message}</p>
                 <div style={{ display: 'flex', justifyContent: 'center', margin: '16px 0' }}><RiskGauge score={rs} size={130} /></div>
+
+                {/* Info table — only show if we have valid parts */}
                 <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginBottom: 16, fontSize: 15 }}>
-                    {[['UPI ID', result.upiId], ['Bank', result.bankName], ['Handle', `@${result.handle}`]].map(([k, v]) => (
+                    {[
+                        ['UPI ID', result.upiId],
+                        ['Bank', result.bankName || 'Unknown'],
+                        ['Handle', result.handle ? `@${result.handle}` : '—']
+                    ].map(([k, v]) => (
                         <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                             <span style={{ color: 'var(--text-secondary)' }}>{k}</span><span className="mono">{v}</span>
                         </div>
                     ))}
                 </div>
+
+                {/* Report data from backend */}
+                {reportData && reportData.found && (
+                    <div style={{ background: 'rgba(255,59,92,0.06)', border: '1px solid rgba(255,59,92,0.15)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+                        <p style={{ fontWeight: 700, fontSize: 14, color: 'var(--accent-red)', marginBottom: 8 }}>⚠️ PREVIOUSLY REPORTED AS FRAUD</p>
+                        {[
+                            ['Times reported', reportData.report_count],
+                            ['Confirmed frauds', reportData.confirmed_fraud_count || 0],
+                            ['Total lost', `₹${(reportData.total_amount_lost || 0).toLocaleString('en-IN')}`],
+                            ['First reported', reportData.first_reported ? new Date(reportData.first_reported).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '—'],
+                            ['Last reported', reportData.last_reported ? new Date(reportData.last_reported).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '—'],
+                        ].map(([k, v]) => (
+                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13 }}>
+                                <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
+                                <span className="mono" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{v}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 <SignalList signals={result.signals} />
+
+                {rs <= 40 && !isFormatOrHandleError && (
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginTop: 16 }}>
+                        <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>✓ VERIFICATION CHECKLIST:</p>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Before proceeding, confirm:</p>
+                        <ul style={{ color: 'var(--text-secondary)', fontSize: 13, paddingLeft: 18, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <li>I recognize this payee/merchant</li>
+                            <li>The payee name matches the business/person</li>
+                            <li>I initiated this transaction</li>
+                            <li>The amount is correct</li>
+                            <li>I trust this recipient</li>
+                        </ul>
+                        <p style={{ color: 'var(--accent-cyan)', fontSize: 13, marginTop: 12, fontWeight: 500 }}>
+                            ⚠️ Never pay based on phone calls or messages asking you to make "urgent" payments
+                        </p>
+                    </div>
+                )}
                 {rs > 60 && (
                     <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 16, lineHeight: 1.7 }}>
                         This UPI ID has patterns commonly seen in scam accounts. Do not transfer money to this ID.
                     </p>
                 )}
                 <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
-                    {rs > 30 && <button onClick={() => onReport?.({ item: result.upiId, type: 'UPI ID', risk: rs })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>🚨 Report This ID</button>}
+                    <button onClick={() => onReport?.({ item: result.upiId, type: 'UPI ID', risk: rs })}
+                        className="btn-secondary"
+                        style={{
+                            flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140,
+                            ...(rs > 60 ? { background: 'rgba(255,59,92,0.1)', color: 'var(--accent-red)', border: '1px solid rgba(255,59,92,0.2)' } : {})
+                        }}>
+                        {rs > 60 ? '🚨 Report as Fraud' : rs > 30 ? '⚠️ Report as Suspicious' : 'ℹ️ Report if suspicious'}
+                    </button>
                     <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>Check Another</button>
                 </div>
             </div>

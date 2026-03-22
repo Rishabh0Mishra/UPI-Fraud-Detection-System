@@ -1,33 +1,76 @@
 const fraudTypes = ['vishing', 'account_takeover', 'social_engineering', 'qr_scam', 'fake_app', 'money_mule']
 const hardRules = ['sender_is_known_controller', 'intra_ring_transfer', 'receiver_is_fake_merchant', 'extreme_amount_ratio']
 const txnTypes = ['P2P', 'P2M', 'BILL', 'RECHARGE']
+const trustFactors = ['verified_merchant', 'repeat_beneficiary', 'normal_amount', 'normal_hour', 'scan_history']
+const fraudIndicators = ['name_mismatch_critical', 'name_mismatch_high', 'unverified_reports_few', 'confirmed_fraud_single', 'phishing_pattern', 'amount_anomaly']
 
 export const generateMockTransaction = () => {
     const rand = Math.random()
-    const isBlock = rand < 0.02
-    const isReview = rand < 0.05 && !isBlock
-    const decision = isBlock ? 'BLOCK' : isReview ? 'REVIEW' : 'ALLOW'
+    const isFraud = rand < 0.05  // ~5% fraud rate
 
-    const fraudScore = isBlock
-        ? 0.82 + Math.random() * 0.18
-        : isReview
-            ? 0.45 + Math.random() * 0.37
-            : Math.random() * 0.44
+    // Internal risk score (0-100)
+    const internalRiskScore = isFraud
+        ? 50 + Math.random() * 50  // 50-100
+        : Math.random() * 49       // 0-49
+
+    // Binary classification based on threshold 50
+    const classification = internalRiskScore >= 50 ? 'FRAUD' : 'NO_FRAUD'
+
+    // Legacy decision mapping
+    const decision = internalRiskScore >= 80 ? 'BLOCK' : internalRiskScore >= 50 ? 'REVIEW' : 'ALLOW'
+
+    // Status
+    const status = internalRiskScore >= 65 ? 'BLOCKED' : internalRiskScore >= 50 ? 'WARNING' : 'ALLOWED'
+
+    // Legacy 0-1 fraud score
+    const fraudScore = parseFloat((internalRiskScore / 100).toFixed(4))
+
+    // Penalties and reductions
+    const penalties = {}
+    const reductions = {}
+    const indicators = []
+    const trustInds = []
+
+    if (isFraud) {
+        const numPenalties = 1 + Math.floor(Math.random() * 2)
+        for (let i = 0; i < numPenalties; i++) {
+            const ind = fraudIndicators[Math.floor(Math.random() * fraudIndicators.length)]
+            penalties[ind] = 10 + Math.floor(Math.random() * 40)
+            indicators.push(ind)
+        }
+    } else {
+        const numReductions = 1 + Math.floor(Math.random() * 3)
+        for (let i = 0; i < numReductions; i++) {
+            const trust = trustFactors[Math.floor(Math.random() * trustFactors.length)]
+            reductions[trust] = -(3 + Math.floor(Math.random() * 12))
+            trustInds.push(trust)
+        }
+    }
 
     return {
         transaction_id: `TXN${String(Math.floor(Math.random() * 99999999)).padStart(8, '0')}`,
+        classification,
         decision,
-        fraud_score: parseFloat(fraudScore.toFixed(4)),
+        status,
+        fraud_score: fraudScore,
+        internal_risk_score: parseFloat(internalRiskScore.toFixed(2)),
         lgbm_score: parseFloat((fraudScore * (0.9 + Math.random() * 0.1)).toFixed(4)),
         graph_risk_score: parseFloat((fraudScore * (0.7 + Math.random() * 0.3)).toFixed(4)),
-        reason: isBlock ? hardRules[Math.floor(Math.random() * hardRules.length)] : null,
+        base_score: parseFloat((internalRiskScore * 0.6).toFixed(2)),
+        penalty_total: Object.values(penalties).reduce((a, b) => a + b, 0),
+        reduction_total: Object.values(reductions).reduce((a, b) => a + b, 0),
+        applied_penalties: Object.keys(penalties).length > 0 ? penalties : null,
+        applied_reductions: Object.keys(reductions).length > 0 ? reductions : null,
+        fraud_indicators: indicators.length > 0 ? indicators : null,
+        trust_indicators: trustInds.length > 0 ? trustInds : null,
+        reason: isFraud && internalRiskScore >= 80 ? hardRules[Math.floor(Math.random() * hardRules.length)] : null,
         latency_ms: parseFloat((3 + Math.random() * 20).toFixed(1)),
         timestamp: new Date().toISOString(),
         sender_user_id: `USR${String(Math.floor(Math.random() * 49999)).padStart(6, '0')}`,
         receiver_id: `USR${String(Math.floor(Math.random() * 49999)).padStart(6, '0')}`,
         amount: Math.floor(Math.exp(Math.random() * 8 + 3)),
         transaction_type: txnTypes[Math.floor(Math.random() * txnTypes.length)],
-        fraud_type: isBlock || isReview ? fraudTypes[Math.floor(Math.random() * fraudTypes.length)] : null,
+        fraud_type: isFraud ? fraudTypes[Math.floor(Math.random() * fraudTypes.length)] : null,
     }
 }
 
@@ -43,15 +86,59 @@ export const generateMockHealth = () => ({
     uptime_seconds: 3600 + Math.floor(Math.random() * 7200),
 })
 
-export const generateMockStats = () => ({
-    total_scored: 12453 + Math.floor(Math.random() * 100),
-    total_blocked: 91 + Math.floor(Math.random() * 5),
-    total_reviewed: 342 + Math.floor(Math.random() * 10),
-    total_allowed: 12020 + Math.floor(Math.random() * 85),
-    block_rate: 0.0073,
-    review_rate: 0.0275,
-    uptime_seconds: 3600 + Math.floor(Math.random() * 7200),
-})
+export const generateMockStats = () => {
+    const total = 12453 + Math.floor(Math.random() * 100)
+    const fraud = 91 + Math.floor(Math.random() * 5)
+    const noFraud = total - fraud
+    return {
+        total_scored: total,
+        total_blocked: Math.floor(fraud * 0.8),
+        total_reviewed: Math.floor(fraud * 0.2),
+        total_allowed: noFraud,
+        total_fraud: fraud,
+        total_no_fraud: noFraud,
+        fraud_rate: parseFloat((fraud / total).toFixed(4)),
+        block_rate: parseFloat((Math.floor(fraud * 0.8) / total).toFixed(4)),
+        review_rate: parseFloat((Math.floor(fraud * 0.2) / total).toFixed(4)),
+        uptime_seconds: 3600 + Math.floor(Math.random() * 7200),
+    }
+}
+
+export const generateMockDashboardStats = () => {
+    const total = 1200 + Math.floor(Math.random() * 300)
+    const fraud = Math.floor(total * (0.03 + Math.random() * 0.04))
+    const noFraud = total - fraud
+    return {
+        time_window: '1_HOUR',
+        total_transactions: total,
+        no_fraud_count: noFraud,
+        fraud_count: fraud,
+        fraud_rate: parseFloat((fraud / total).toFixed(4)),
+        average_risk_score: parseFloat((15 + Math.random() * 25).toFixed(2)),
+        total_amount: Math.floor(total * 1200),
+        blocked_amount: Math.floor(fraud * 5000),
+        top_fraud_indicators: [['name_mismatch_critical', 12], ['unverified_reports_few', 8], ['phishing_pattern', 5]],
+        unique_senders: Math.floor(total * 0.85),
+        unique_receivers: Math.floor(total * 0.6),
+    }
+}
+
+export const generateMockHourlyTrend = () => {
+    const hours = []
+    for (let i = 23; i >= 0; i--) {
+        const date = new Date()
+        date.setHours(date.getHours() - i)
+        const total = 50 + Math.floor(Math.random() * 100)
+        const fraud = Math.floor(total * (0.02 + Math.random() * 0.05))
+        hours.push({
+            hour: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            total,
+            fraud,
+            no_fraud: total - fraud,
+        })
+    }
+    return hours
+}
 
 export const generateDailyAnalytics = () => {
     const days = []
@@ -59,13 +146,16 @@ export const generateDailyAnalytics = () => {
         const date = new Date()
         date.setDate(date.getDate() - i)
         const total = 400 + Math.floor(Math.random() * 200)
-        const blocked = Math.floor(total * (0.005 + Math.random() * 0.01))
-        const reviewed = Math.floor(total * (0.02 + Math.random() * 0.02))
-        const allowed = total - blocked - reviewed
+        const fraud = Math.floor(total * (0.03 + Math.random() * 0.04))
+        const noFraud = total - fraud
         days.push({
             date: date.toISOString().split('T')[0],
-            total, blocked, reviewed, allowed,
-            fraud_rate: parseFloat(((blocked / total) * 100).toFixed(2)),
+            total, fraud, no_fraud: noFraud,
+            fraud_rate: parseFloat(((fraud / total) * 100).toFixed(2)),
+            // Legacy fields
+            blocked: Math.floor(fraud * 0.8),
+            reviewed: Math.floor(fraud * 0.2),
+            allowed: noFraud,
         })
     }
     return days
@@ -76,11 +166,16 @@ export const generateHourlyData = () => {
     for (let i = 23; i >= 0; i--) {
         const date = new Date()
         date.setHours(date.getHours() - i)
+        const total = 50 + Math.floor(Math.random() * 100)
+        const fraud = Math.floor(total * (0.02 + Math.random() * 0.05))
         hours.push({
             hour: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            blocked: Math.floor(Math.random() * 8),
-            reviewed: Math.floor(Math.random() * 15),
-            allowed: 150 + Math.floor(Math.random() * 100),
+            fraud,
+            no_fraud: total - fraud,
+            // Legacy fields for backward compat
+            blocked: fraud,
+            reviewed: 0,
+            allowed: total - fraud,
             p50: 5 + Math.random() * 10,
             p95: 20 + Math.random() * 20,
             p99: 35 + Math.random() * 15,
