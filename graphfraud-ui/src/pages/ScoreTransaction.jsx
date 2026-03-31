@@ -3,9 +3,8 @@ import { scoreTransaction } from '../api/fraudApi'
 import { TEST_CASES } from '../api/mockData'
 import { useToast } from '../components/common/ToastNotification'
 import DecisionBadge from '../components/common/DecisionBadge'
-import FraudScoreBar from '../components/common/FraudScoreBar'
 import { Zap, RefreshCw, Copy, Download, Flag, ChevronDown, ChevronUp, Loader2, AlertTriangle, Clock } from 'lucide-react'
-import { formatDistanceToNow, format } from 'date-fns'
+
 
 const INITIAL_FORM = {
     transaction_id: '', sender_user_id: '', receiver_id: '', amount: '',
@@ -78,7 +77,8 @@ export default function ScoreTransaction() {
             const enriched = { ...res, amount: parseFloat(form.amount), sender_user_id: form.sender_user_id, receiver_id: form.receiver_id, transaction_type: form.transaction_type, _formSnapshot: { ...form } }
             setResult(enriched)
             setHistory((prev) => [enriched, ...prev.slice(0, 9)])
-            showToast(`Transaction scored: ${res.decision}`, res.decision === 'BLOCK' ? 'error' : res.decision === 'REVIEW' ? 'warning' : 'success')
+            const isFraud = res.classification === 'FRAUD' || res.decision === 'BLOCK'
+            showToast(`Transaction classified: ${isFraud ? 'FRAUD' : 'NO FRAUD'}`, isFraud ? 'error' : 'success')
         } catch (err) {
             showToast(`Scoring failed: ${err.message}`, 'error')
             setShakeError(true)
@@ -88,13 +88,24 @@ export default function ScoreTransaction() {
     }
 
     const copyJSON = () => {
-        navigator.clipboard.writeText(JSON.stringify(result, null, 2))
+        // Create a copy without internal scores to match UI representation
+        const toCopy = { ...result }
+        delete toCopy.fraud_score
+        delete toCopy.internal_risk_score
+        delete toCopy.lgbm_score
+        delete toCopy.graph_risk_score
+        delete toCopy.base_score
+        delete toCopy.penalty_total
+        delete toCopy.reduction_total
+
+        navigator.clipboard.writeText(JSON.stringify(toCopy, null, 2))
         showToast('JSON copied to clipboard', 'success')
     }
 
     const exportReport = () => {
         if (!result) return
-        const text = `FRAUD DETECTION REPORT\n${'='.repeat(50)}\nGenerated: ${new Date().toISOString()}\n\nTransaction ID: ${result.transaction_id}\nDecision: ${result.decision}\nFraud Score: ${result.fraud_score}\nLightGBM Score: ${result.lgbm_score}\nGraph Risk Score: ${result.graph_risk_score}\nReason: ${result.reason || 'N/A'}\nLatency: ${result.latency_ms}ms\n\nSender: ${result.sender_user_id}\nReceiver: ${result.receiver_id}\nAmount: ₹${parseFloat(form.amount).toLocaleString('en-IN')}\nType: ${result.transaction_type}\n`
+        const isFraud = result.classification === 'FRAUD' || result.decision === 'BLOCK'
+        const text = `FRAUD DETECTION REPORT\n${'='.repeat(50)}\nGenerated: ${new Date().toISOString()}\n\nTransaction ID: ${result.transaction_id}\nClassification: ${isFraud ? 'FRAUD' : 'NO FRAUD'}\nReason: ${result.reason || 'N/A'}\nLatency: ${result.latency_ms}ms\n\nSender: ${result.sender_user_id}\nReceiver: ${result.receiver_id}\nAmount: ₹${parseFloat(form.amount).toLocaleString('en-IN')}\nType: ${result.transaction_type}\n`
         const blob = new Blob([text], { type: 'text/plain' })
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
@@ -103,67 +114,28 @@ export default function ScoreTransaction() {
         showToast('Report downloaded', 'success')
     }
 
-    const computeSignals = useCallback(() => {
-        if (!result) return []
-        const signals = []
-        const amt = parseFloat(form.amount) || 0
-        const avg = parseFloat(form.sender_avg_txn_amount) || 500
-        const ratio = amt / (avg + 0.001)
-        const acctAge = parseFloat(form.sender_account_age_days) || 365
-        const vuln = form.sender_vulnerability_score || 0.3
-        const hour = form.sender_preferred_hour || 14
-        const hourDev = Math.min(Math.abs(new Date().getHours() - hour), 12)
-
-        if (result.reason === 'sender_is_known_controller') signals.push({ name: 'sender_is_controller', value: 0.42, positive: true })
-        if (result.reason === 'intra_ring_transfer') signals.push({ name: 'intra_ring_txn', value: 0.38, positive: true })
-        if (ratio > 10) signals.push({ name: `amount_ratio (${ratio.toFixed(0)}×)`, value: Math.min(ratio / 200, 0.4), positive: true })
-        if (acctAge < 30) signals.push({ name: 'sender_new_account', value: 0.24, positive: true })
-        if (vuln > 0.7) signals.push({ name: `vulnerability (${vuln.toFixed(1)})`, value: vuln * 0.3, positive: true })
-        if (hourDev > 6) signals.push({ name: `hour_deviation (${hourDev}h)`, value: 0.18, positive: true })
-        if (form.receiver_is_fake_merchant) signals.push({ name: 'fake_merchant', value: 0.35, positive: true })
-        if (form.sender_kyc_level === 'full') signals.push({ name: 'sender_kyc_full', value: 0.09, positive: false })
-        if (ratio < 2 && ratio > 0.3) signals.push({ name: 'normal_amount_range', value: 0.07, positive: false })
-        if (acctAge > 365) signals.push({ name: 'established_account', value: 0.06, positive: false })
-
-        return signals.sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).slice(0, 6)
-    }, [result, form])
-
     const generateExplanation = () => {
         if (!result) return ''
         const amt = parseFloat(form.amount) || 0
-        const avg = parseFloat(form.sender_avg_txn_amount) || 500
-        const ratio = (amt / (avg + 0.001)).toFixed(0)
-
+        const isFraud = result.classification === 'FRAUD' || result.decision === 'BLOCK'
+        
         if (result.reason === 'sender_is_known_controller') {
-            return `This transaction was BLOCKED because the sender ${form.sender_user_id} is a known fraud ring controller. The amount of ₹${amt.toLocaleString('en-IN')} is ${ratio}× this user's typical transaction. Hard rule triggered — no model score computation was needed.`
+            return `This transaction was classified as FRAUD because the sender ${form.sender_user_id} is a known fraud ring controller. Hard rule triggered.`
         }
         if (result.reason === 'intra_ring_transfer') {
-            return `This transaction was BLOCKED because both sender and receiver are members of the same fraud ring. This pattern is characteristic of money mule operations. Hard rule triggered.`
+            return `This transaction was classified as FRAUD because both sender and receiver are members of the same fraud ring. This pattern is characteristic of money mule operations. Hard rule triggered.`
         }
         if (result.reason === 'receiver_is_fake_merchant') {
-            return `This transaction was BLOCKED because the receiver has been flagged as a fake merchant in our database. No funds were transferred.`
+            return `This transaction was classified as FRAUD because the receiver has been flagged as a fake merchant in our database. No funds were transferred.`
         }
         if (result.reason === 'extreme_amount_ratio') {
-            return `This transaction was BLOCKED because the amount of ₹${amt.toLocaleString('en-IN')} is ${ratio}× the sender's average, which exceeds the extreme ratio threshold (50×). Hard rule triggered.`
+            return `This transaction was classified as FRAUD due to an extreme amount anomaly. Hard rule triggered.`
         }
-        if (result.decision === 'BLOCK') {
-            return `This transaction scored ${result.fraud_score.toFixed(4)} which exceeds the BLOCK threshold. The amount of ₹${amt.toLocaleString('en-IN')} (${ratio}× typical) combined with other risk signals triggered the model.`
+        if (isFraud) {
+            return `This transaction was classified as FRAUD due to matching known risk patterns and indicators. It has been flagged and action will be taken based on current policies.`
         }
-        if (result.decision === 'REVIEW') {
-            return `This transaction scored ${result.fraud_score.toFixed(4)} which is between the REVIEW and BLOCK thresholds. Manual review is recommended before processing.`
-        }
-        return `This transaction passed all security checks with a low fraud score of ${result.fraud_score.toFixed(6)}. The sender's profile, amount, and behavioral patterns are consistent with legitimate activity.`
+        return `This transaction was classified as NO FRAUD. The sender's profile, amount, and behavioral patterns are consistent with legitimate activity.`
     }
-
-    const decisionBg = (d) => {
-        if (d === 'BLOCK') return 'linear-gradient(135deg, rgba(255,59,92,0.15), rgba(255,59,92,0.05))'
-        if (d === 'REVIEW') return 'linear-gradient(135deg, rgba(255,176,32,0.15), rgba(255,176,32,0.05))'
-        return 'linear-gradient(135deg, rgba(0,229,160,0.1), rgba(0,229,160,0.03))'
-    }
-
-    const decisionBorder = (d) => d === 'BLOCK' ? 'rgba(255,59,92,0.3)' : d === 'REVIEW' ? 'rgba(255,176,32,0.3)' : 'rgba(0,229,160,0.2)'
-
-    const signals = computeSignals()
 
     return (
         <div className="grid gap-4 h-full" style={{ gridTemplateColumns: '38% 40% 22%', minHeight: 'calc(100vh - 130px)' }}>
@@ -256,10 +228,7 @@ export default function ScoreTransaction() {
                         </div>
                         <div>
                             <label className="text-xs mb-1 flex justify-between" style={{ color: 'var(--text-secondary)' }}>
-                                <span>Vulnerability Score</span>
-                                <span className="mono" style={{ color: form.sender_vulnerability_score > 0.7 ? 'var(--accent-red)' : form.sender_vulnerability_score > 0.4 ? 'var(--accent-amber)' : 'var(--accent-green)' }}>
-                                    {form.sender_vulnerability_score.toFixed(2)}
-                                </span>
+                                <span>Vulnerability Index Indicator</span>
                             </label>
                             <input type="range" min="0" max="1" step="0.05" value={form.sender_vulnerability_score} onChange={(e) => set('sender_vulnerability_score', parseFloat(e.target.value))}
                                 className="w-full" style={{ accentColor: form.sender_vulnerability_score > 0.7 ? '#FF3B5C' : form.sender_vulnerability_score > 0.4 ? '#FFB020' : '#00E5A0' }}
@@ -305,7 +274,7 @@ export default function ScoreTransaction() {
                         </label>
                         {form.receiver_is_fake_merchant === 1 && (
                             <div className="p-3 rounded-lg text-xs fade-in" style={{ background: 'rgba(255,59,92,0.1)', border: '1px solid rgba(255,59,92,0.2)', color: 'var(--accent-red)' }}>
-                                <AlertTriangle size={14} className="inline mr-1" /> This will trigger a hard BLOCK rule regardless of model score
+                                <AlertTriangle size={14} className="inline mr-1" /> This will trigger a hard FRAUD rule
                             </div>
                         )}
                     </div>
@@ -353,85 +322,66 @@ export default function ScoreTransaction() {
                     <div className="card flex flex-col items-center justify-center h-full" style={{ minHeight: 400 }}>
                         <Zap size={48} style={{ color: 'var(--text-muted)', opacity: 0.3 }} />
                         <p className="mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Submit a transaction to see results</p>
-                        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Use the test cases to get started →</p>
                     </div>
                 ) : (
                     <div className="space-y-4">
                         {/* Decision Banner */}
-                        <div className={`card ${result.decision === 'BLOCK' ? 'block-flash' : ''} fade-in`}
-                            style={{ background: decisionBg(result.decision), border: `1px solid ${decisionBorder(result.decision)}`, padding: '20px 24px' }}
+                        <div className={`card fade-in flex items-center justify-center`}
+                            style={{ padding: '30px 24px', textAlign: 'center' }}
                         >
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <DecisionBadge decision={result.decision} size="lg" />
-                                    {result.reason && <div className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>{result.reason}</div>}
-                                </div>
-                                <div className="text-right">
-                                    <div className="mono text-3xl font-bold">{result.fraud_score.toFixed(4)}</div>
-                                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>fraud score</div>
-                                </div>
+                            <div>
+                                <div className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>Classification Result</div>
+                                <DecisionBadge decision={result.classification || (result.decision === 'ALLOW' ? 'NO_FRAUD' : 'FRAUD')} size="lg" />
+                                {result.reason && <div className="text-xs mt-4 font-medium" style={{ color: 'var(--text-secondary)' }}>Trigger: {result.reason}</div>}
                             </div>
                         </div>
 
-                        {/* Score Breakdown */}
+                        {/* Indicators Breakdown */}
                         <div className="card fade-in" style={{ animationDelay: '150ms' }}>
-                            <div className="section-header">Score Breakdown</div>
+                            <div className="section-header">Identified Indicators</div>
                             <div className="space-y-3">
-                                {[
-                                    ['LightGBM Score', result.lgbm_score],
-                                    ['Graph Ring Risk', result.graph_risk_score],
-                                ].map(([label, value]) => (
-                                    <div key={label}>
-                                        <div className="flex justify-between text-xs mb-1">
-                                            <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-                                        </div>
-                                        <FraudScoreBar score={value} height={8} />
+                                {(!result.fraud_indicators?.length && !result.trust_indicators?.length) && (
+                                    <div className="text-xs px-2" style={{ color: 'var(--text-muted)' }}>No strong indicators found</div>
+                                )}
+                                
+                                {result.fraud_indicators && result.fraud_indicators.length > 0 && (
+                                    <div className="space-y-2">
+                                        <div className="text-xs font-medium" style={{ color: 'var(--accent-red)' }}>Risk Flags</div>
+                                        {result.fraud_indicators.map((ind, i) => (
+                                            <div key={`f_${i}`} className="flex items-center gap-2 text-xs p-2 rounded" style={{ background: 'rgba(255,59,92,0.1)'}}>
+                                                <span>🔴</span>
+                                                <span style={{ color: 'var(--text-primary)' }}>{ind.replace(/_/g, ' ')}</span>
+                                            </div>
+                                        ))}
                                     </div>
-                                ))}
-                                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                                    <div className="flex justify-between text-xs mb-1">
-                                        <span className="font-medium">Final Score (calibrated)</span>
+                                )}
+                                
+                                {result.trust_indicators && result.trust_indicators.length > 0 && (
+                                    <div className="space-y-2 mt-3">
+                                        <div className="text-xs font-medium" style={{ color: 'var(--accent-green)' }}>Trust Factors</div>
+                                        {result.trust_indicators.map((ind, i) => (
+                                            <div key={`t_${i}`} className="flex items-center gap-2 text-xs p-2 rounded" style={{ background: 'rgba(0,229,160,0.1)'}}>
+                                                <span>🟢</span>
+                                                <span style={{ color: 'var(--text-primary)' }}>{ind.replace(/_/g, ' ')}</span>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <FraudScoreBar score={result.fraud_score} height={12} />
-                                </div>
-                                <div className="flex justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
-                                    <span>Latency: <span className="mono">{result.latency_ms}ms</span></span>
+                                )}
+                                
+                                <div className="flex justify-between text-xs mt-4 pt-4" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+                                    <span>Processing Time: <span className="mono font-medium">{result.latency_ms}ms</span></span>
                                 </div>
                             </div>
                         </div>
-
-                        {/* Risk Signals */}
-                        {signals.length > 0 && (
-                            <div className="card fade-in" style={{ animationDelay: '300ms' }}>
-                                <div className="section-header">Key Risk Signals</div>
-                                <div className="space-y-2">
-                                    {signals.map((sig, i) => (
-                                        <div key={i} className="flex items-center gap-3">
-                                            <span>{sig.positive ? '🔴' : '🟢'}</span>
-                                            <span className="text-xs flex-1" style={{ color: 'var(--text-secondary)' }}>{sig.name}</span>
-                                            <div style={{ width: 100 }}>
-                                                <div className="rounded-full overflow-hidden" style={{ height: 6, background: 'rgba(255,255,255,0.06)' }}>
-                                                    <div className="rounded-full" style={{ width: `${Math.min(sig.value * 250, 100)}%`, height: '100%', background: sig.positive ? 'var(--accent-red)' : 'var(--accent-green)', transition: 'width 0.6s ease-out' }} />
-                                                </div>
-                                            </div>
-                                            <span className="mono text-xs" style={{ color: sig.positive ? 'var(--accent-red)' : 'var(--accent-green)', width: 45, textAlign: 'right' }}>
-                                                {sig.positive ? '+' : '-'}{sig.value.toFixed(2)}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>Red bars push score UP · Green bars push score DOWN</div>
-                            </div>
-                        )}
 
                         {/* Explanation */}
-                        <div className="card fade-in" style={{ animationDelay: '450ms' }}>
+                        <div className="card fade-in" style={{ animationDelay: '300ms' }}>
                             <div className="section-header">Why This Decision</div>
                             <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{generateExplanation()}</p>
                         </div>
 
                         {/* Action Buttons */}
-                        <div className="flex gap-2 flex-wrap fade-in" style={{ animationDelay: '600ms' }}>
+                        <div className="flex gap-2 flex-wrap fade-in" style={{ animationDelay: '450ms' }}>
                             <button onClick={copyJSON} className="btn-secondary text-xs"><Copy size={14} /> Copy JSON</button>
                             <button onClick={() => { setResult(null) }} className="btn-secondary text-xs"><RefreshCw size={14} /> Score Again</button>
                             <button onClick={exportReport} className="btn-secondary text-xs"><Download size={14} /> Export</button>
@@ -445,41 +395,38 @@ export default function ScoreTransaction() {
             <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 130px)' }}>
                 <div className="card h-full">
                     <div className="flex items-center justify-between mb-4">
-                        <div className="section-header mb-0">Today's Scores</div>
+                        <div className="section-header mb-0">Recent Queries</div>
                         <span className="mono text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,212,255,0.1)', color: 'var(--accent-cyan)' }}>{history.length}</span>
                     </div>
 
                     {history.length === 0 ? (
                         <div className="text-center py-8">
-                            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No transactions scored yet</p>
+                            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No transactions processed yet</p>
                         </div>
                     ) : (
                         <div className="space-y-2">
                             {history.map((h, i) => (
                                 <div key={i} className="p-3 rounded-lg cursor-pointer transition-all" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }} onClick={() => setResult(h)}>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <DecisionBadge decision={h.decision} size="sm" />
-                                        <span className="mono text-xs">{h.transaction_id?.slice(0, 12)}</span>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <DecisionBadge decision={h.classification || (h.decision === 'ALLOW' ? 'NO_FRAUD' : 'FRAUD')} size="sm" />
                                     </div>
-                                    <div className="flex justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
-                                        <span>{h.sender_user_id} → {h.receiver_id?.slice(0, 9)}</span>
-                                    </div>
+                                    <div className="mono text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{h.transaction_id?.slice(0, 12)}</div>
                                     <div className="flex justify-between text-xs mt-1">
-                                        <span className="mono">₹{(h.amount || 0).toLocaleString('en-IN')}</span>
-                                        <span className="mono" style={{ color: h.fraud_score >= 0.8 ? 'var(--accent-red)' : h.fraud_score >= 0.45 ? 'var(--accent-amber)' : 'var(--accent-green)' }}>{h.fraud_score?.toFixed(4)}</span>
+                                        <span style={{ color: 'var(--text-muted)' }}>{h.sender_user_id} → {h.receiver_id?.slice(0, 9)}</span>
+                                        <span className="mono font-medium">₹{(h.amount || 0).toLocaleString('en-IN')}</span>
                                     </div>
                                 </div>
                             ))}
                         </div>
                     )}
-
+                    
                     {history.length > 0 && (
                         <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-                            <div className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Session Summary</div>
-                            {[['Scored', history.length, 'var(--text-primary)'], ['Blocked', history.filter((h) => h.decision === 'BLOCK').length, 'var(--accent-red)'], ['Reviewed', history.filter((h) => h.decision === 'REVIEW').length, 'var(--accent-amber)'], ['Allowed', history.filter((h) => h.decision === 'ALLOW').length, 'var(--accent-green)']].map(([label, count, color]) => (
-                                <div key={label} className="flex justify-between text-xs mb-1">
+                            <div className="text-xs font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>Session Summary</div>
+                            {[['Processed', history.length, 'var(--text-primary)'], ['Classified Fraud', history.filter((h) => h.classification === 'FRAUD' || h.decision === 'BLOCK').length, 'var(--accent-red)'], ['Classified No Fraud', history.filter((h) => h.classification === 'NO_FRAUD' || h.decision === 'ALLOW').length, 'var(--accent-green)']].map(([label, count, color]) => (
+                                <div key={label} className="flex justify-between text-xs mb-2">
                                     <span style={{ color: 'var(--text-muted)' }}>{label}</span>
-                                    <span className="mono font-medium" style={{ color }}>{count}{history.length > 0 && label !== 'Scored' && ` (${((count / history.length) * 100).toFixed(0)}%)`}</span>
+                                    <span className="font-medium" style={{ color }}>{count}</span>
                                 </div>
                             ))}
                         </div>

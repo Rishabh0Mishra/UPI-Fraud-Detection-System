@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from './components/common/ToastNotification'
+import { LiveFeedProvider } from './context/LiveFeedContext'
 import Layout from './components/layout/Layout'
 import Dashboard from './pages/Dashboard'
 import LiveFeed from './pages/LiveFeed'
@@ -9,7 +10,11 @@ import RingExplorer from './pages/RingExplorer'
 import Analytics from './pages/Analytics'
 import SystemHealth from './pages/SystemHealth'
 import AdminPanel from './pages/AdminPanel'
-import UserPortal from './pages/UserPortal'
+import QRCodeCheck from './pages/user/QRCodeCheck'
+import LinkCheck from './pages/user/LinkCheck'
+import UPIIDCheck from './pages/user/UPIIDCheck'
+import TxnLookup from './pages/user/TxnLookup'
+import BatchUpload from './pages/user/BatchUpload'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +26,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
+        <LiveFeedProvider>
         <BrowserRouter>
           <Layout>
             <Routes>
@@ -31,11 +37,17 @@ export default function App() {
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/health" element={<SystemHealth />} />
               <Route path="/admin" element={<AdminPanel />} />
-              <Route path="/user" element={<UserPortal />} />
+              <Route path="/qrcode" element={<QRCodeCheck />} />
+              <Route path="/linkcheck" element={<LinkCheck />} />
+              <Route path="/upiid" element={<UPIIDCheck />} />
+              <Route path="/txnlookup" element={<TxnLookup />} />
+              <Route path="/batchupload" element={<BatchUpload />} />
+              <Route path="/user" element={<Navigate to="/qrcode" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Layout>
         </BrowserRouter>
+        </LiveFeedProvider>
       </ToastProvider>
     </QueryClientProvider>
   )

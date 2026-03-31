@@ -8,7 +8,7 @@ import { CheckCircle, XCircle, Server, Cpu } from 'lucide-react'
 
 export default function SystemHealth() {
     const { data: health, isLoading: hLoading, error: hError, refetch: hRefetch } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: HEALTH_REFRESH_MS })
-    const { data: stats, isLoading: sLoading, refetch: sRefetch } = useQuery({ queryKey: ['stats'], queryFn: getStats, refetchInterval: STATS_REFRESH_MS })
+    const { data: stats, isLoading: sLoading } = useQuery({ queryKey: ['stats'], queryFn: getStats, refetchInterval: STATS_REFRESH_MS })
 
     if (hLoading || sLoading) return <LoadingSpinner text="Checking system health..." />
     if (hError) return <ErrorBanner message={hError.message} onRetry={hRefetch} />
@@ -20,8 +20,8 @@ export default function SystemHealth() {
         <div className="space-y-6">
             {/* Status Banner */}
             <div className="card flex items-center gap-4" style={{
-                background: isHealthy ? 'rgba(0,229,160,0.05)' : 'rgba(255,59,92,0.05)',
-                borderColor: isHealthy ? 'rgba(0,229,160,0.2)' : 'rgba(255,59,92,0.2)',
+                background: isHealthy ? 'rgba(92,186,138,0.05)' : 'rgba(232,82,82,0.05)',
+                borderColor: isHealthy ? 'rgba(92,186,138,0.2)' : 'rgba(232,82,82,0.2)',
             }}>
                 {isHealthy ? <CheckCircle size={24} style={{ color: 'var(--accent-green)' }} /> : <XCircle size={24} style={{ color: 'var(--accent-red)' }} />}
                 <div>
@@ -122,7 +122,7 @@ export default function SystemHealth() {
                             <tr key={ep} style={{ borderBottom: '1px solid var(--border)' }}>
                                 <td className="py-2.5 px-3 mono text-xs">{ep}</td>
                                 <td className="py-2.5 px-3">
-                                    <span className="text-xs px-2 py-0.5 rounded" style={{ background: method === 'POST' ? 'rgba(0,229,160,0.1)' : 'rgba(0,212,255,0.1)', color: method === 'POST' ? '#00E5A0' : '#00D4FF' }}>{method}</span>
+                                    <span className="text-xs px-2 py-0.5 rounded" style={{ background: method === 'POST' ? 'rgba(92,186,138,0.1)' : 'rgba(232,184,109,0.1)', color: method === 'POST' ? 'var(--accent-green)' : 'var(--accent-cyan)' }}>{method}</span>
                                 </td>
                                 <td className="py-2.5 px-3 text-right">
                                     <span className="mono text-xs flex items-center justify-end gap-1" style={{ color: 'var(--accent-green)' }}>{status} <CheckCircle size={12} /></span>

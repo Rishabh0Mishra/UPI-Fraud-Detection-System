@@ -1,19 +1,26 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 
-export default function DecisionPieChart({ blocked = 0, reviewed = 0, allowed = 0 }) {
-    const total = blocked + reviewed + allowed || 1
-    const data = [
-        { name: 'BLOCK', value: blocked, color: '#FF3B5C' },
-        { name: 'REVIEW', value: reviewed, color: '#FFB020' },
-        { name: 'ALLOW', value: allowed, color: '#00E5A0' },
-    ]
+export default function DecisionPieChart({ blocked = 0, reviewed = 0, allowed = 0, fraud = 0, noFraud = 0 }) {
+    // Use binary classification if provided, otherwise fallback to legacy
+    const useBinary = fraud > 0 || noFraud > 0
+    const data = useBinary
+        ? [
+            { name: 'FRAUD', value: fraud, color: '#FF3B5C' },
+            { name: 'NO FRAUD', value: noFraud, color: '#00E5A0' },
+        ]
+        : [
+            { name: 'FRAUD', value: blocked + reviewed, color: '#FF3B5C' },
+            { name: 'NO FRAUD', value: allowed, color: '#00E5A0' },
+        ]
+
+    const total = data.reduce((sum, d) => sum + d.value, 0) || 1
 
     return (
         <div className="flex flex-col items-center">
             <div style={{ width: 200, height: 200, position: 'relative' }}>
                 <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                        <Pie data={data} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value" strokeWidth={0}>
+                        <Pie data={data} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value" strokeWidth={0}>
                             {data.map((entry, i) => (
                                 <Cell key={i} fill={entry.color} />
                             ))}

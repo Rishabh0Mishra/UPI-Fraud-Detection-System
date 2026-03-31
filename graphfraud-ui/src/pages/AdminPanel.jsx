@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getHealth } from '../api/fraudApi'
 import { useToast } from '../components/common/ToastNotification'
@@ -14,7 +14,7 @@ const DEFAULT_RULES = [
 ]
 
 export default function AdminPanel() {
-    const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth })
+    useQuery({ queryKey: ['health'], queryFn: getHealth })
     const { showToast } = useToast()
 
     const [thresholds, setThresholds] = useState(() => {
@@ -83,7 +83,7 @@ export default function AdminPanel() {
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
             {/* Warning */}
-            <div className="card flex items-center gap-3" style={{ background: 'rgba(255,176,32,0.05)', borderColor: 'rgba(255,176,32,0.2)' }}>
+            <div className="card flex items-center gap-3" style={{ background: 'rgba(212,168,67,0.05)', borderColor: 'rgba(212,168,67,0.2)' }}>
                 <AlertTriangle size={20} style={{ color: 'var(--accent-amber)' }} />
                 <span className="text-sm" style={{ color: 'var(--accent-amber)' }}>Changes to thresholds affect all live decisions. Adjust carefully and monitor the Live Feed after saving.</span>
             </div>
@@ -93,11 +93,11 @@ export default function AdminPanel() {
                 <div className="section-header">Decision Thresholds</div>
 
                 {/* Visual threshold bar */}
-                <div className="my-6 relative" style={{ height: 32, borderRadius: 16, background: 'linear-gradient(90deg, #00E5A0 0%, #FFB020 50%, #FF3B5C 100%)', opacity: 0.3 }}>
-                    <div className="absolute top-0 bottom-0" style={{ left: `${thresholds.review * 100}%`, width: 2, background: '#FFB020', boxShadow: '0 0 8px #FFB020' }}>
+                <div className="my-6 relative" style={{ height: 32, borderRadius: 16, background: 'linear-gradient(90deg, #5cba8a 0%, #d4a843 50%, #e85252 100%)', opacity: 0.3 }}>
+                    <div className="absolute top-0 bottom-0" style={{ left: `${thresholds.review * 100}%`, width: 2, background: '#d4a843', boxShadow: '0 0 8px #d4a843' }}>
                         <span className="absolute -top-5 -translate-x-1/2 mono text-xs" style={{ color: 'var(--accent-amber)' }}>{thresholds.review.toFixed(2)}</span>
                     </div>
-                    <div className="absolute top-0 bottom-0" style={{ left: `${thresholds.block * 100}%`, width: 2, background: '#FF3B5C', boxShadow: '0 0 8px #FF3B5C' }}>
+                    <div className="absolute top-0 bottom-0" style={{ left: `${thresholds.block * 100}%`, width: 2, background: '#e85252', boxShadow: '0 0 8px #e85252' }}>
                         <span className="absolute -top-5 -translate-x-1/2 mono text-xs" style={{ color: 'var(--accent-red)' }}>{thresholds.block.toFixed(2)}</span>
                     </div>
                 </div>
@@ -115,7 +115,7 @@ export default function AdminPanel() {
                         </label>
                         <input type="range" min="0.1" max={thresholds.block - 0.05} step="0.01" value={thresholds.review}
                             onChange={(e) => setThresholds((p) => ({ ...p, review: parseFloat(e.target.value) }))}
-                            className="w-full" style={{ accentColor: '#FFB020' }}
+                            className="w-full" style={{ accentColor: '#d4a843' }}
                         />
                     </div>
                     <div>
@@ -125,7 +125,7 @@ export default function AdminPanel() {
                         </label>
                         <input type="range" min={thresholds.review + 0.05} max="0.99" step="0.01" value={thresholds.block}
                             onChange={(e) => setThresholds((p) => ({ ...p, block: parseFloat(e.target.value) }))}
-                            className="w-full" style={{ accentColor: '#FF3B5C' }}
+                            className="w-full" style={{ accentColor: '#e85252' }}
                         />
                     </div>
                 </div>

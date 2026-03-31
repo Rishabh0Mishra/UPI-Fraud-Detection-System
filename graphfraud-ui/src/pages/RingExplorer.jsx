@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { FRAUD_RINGS } from '../api/mockData'
+import { getNetworkGraphData, getNetworkPatterns } from '../api/fraudApi'
 import DecisionBadge from '../components/common/DecisionBadge'
-import { Download, Share2 } from 'lucide-react'
+import { Download, Share2, AlertTriangle, TrendingUp, GitBranch } from 'lucide-react'
 import { useToast } from '../components/common/ToastNotification'
 
 const rings = Object.entries(FRAUD_RINGS).map(([id, data]) => ({ id, ...data }))
 
 export default function RingExplorer() {
     const [selectedRing, setSelectedRing] = useState(null)
+    const [dbPatterns, setDbPatterns] = useState([])
+    const [dbGraphData, setDbGraphData] = useState(null)
     const canvasRef = useRef(null)
     const nodesRef = useRef([])
     const edgesRef = useRef([])
@@ -15,11 +18,22 @@ export default function RingExplorer() {
     const dragRef = useRef(null)
     const { showToast } = useToast()
 
+    // Fetch live patterns from DB
+    useEffect(() => {
+        getNetworkPatterns(24).then(data => {
+            if (data?.patterns) setDbPatterns(data.patterns)
+        }).catch(() => {})
+        getNetworkGraphData(50, 24).then(data => {
+            if (data) setDbGraphData(data)
+        }).catch(() => {})
+    }, [])
+
     const initGraph = useCallback(() => {
         const nodes = []
         const nodeMap = {}
         const edges = []
 
+        // Add static ring data
         rings.forEach((ring) => {
             ring.all_members.forEach((m) => {
                 if (!nodeMap[m]) {
@@ -30,7 +44,7 @@ export default function RingExplorer() {
                         ring: ring.id, type: ring.type,
                         isController,
                         radius: isController ? 14 : 8,
-                        color: isController ? '#FF3B5C' : ring.type === 'hub_spoke' ? '#FFB020' : '#00D4FF',
+                        color: isController ? '#e85252' : ring.type === 'hub_spoke' ? '#d4a843' : '#e8b86d',
                     }
                     nodes.push(nodeMap[m])
                 }
@@ -43,9 +57,34 @@ export default function RingExplorer() {
                 }
             })
         })
+
+        // Add DB graph data if available
+        if (dbGraphData && dbGraphData.nodes) {
+            dbGraphData.nodes.forEach(n => {
+                if (!nodeMap[n.id]) {
+                    nodeMap[n.id] = {
+                        id: n.id, x: 100 + Math.random() * 600, y: 100 + Math.random() * 400,
+                        vx: 0, vy: 0,
+                        ring: 'DB_LIVE', type: 'db_transaction',
+                        isController: false,
+                        radius: Math.min(12, 6 + (n.txn_count || 0)),
+                        color: (n.risk || 0) >= 70 ? '#FF3B5C' : '#FFB020',
+                    }
+                    nodes.push(nodeMap[n.id])
+                }
+            })
+            if (dbGraphData.edges) {
+                dbGraphData.edges.forEach(e => {
+                    if (nodeMap[e.source] && nodeMap[e.target]) {
+                        edges.push({ source: nodeMap[e.source], target: nodeMap[e.target] })
+                    }
+                })
+            }
+        }
+
         nodesRef.current = nodes
         edgesRef.current = edges
-    }, [])
+    }, [dbGraphData])
 
     useEffect(() => { initGraph() }, [initGraph])
 
@@ -99,12 +138,12 @@ export default function RingExplorer() {
             })
 
             // Draw
-            ctx.fillStyle = '#0A0E1A'
+            ctx.fillStyle = '#0c0a09'
             ctx.fillRect(0, 0, W, H)
 
             edges.forEach((e) => {
                 const dimmed = selectedRing && e.source.ring !== selectedRing && e.target.ring !== selectedRing
-                ctx.strokeStyle = dimmed ? 'rgba(30,45,74,0.2)' : '#1E2D4A'
+                ctx.strokeStyle = dimmed ? 'rgba(42,36,32,0.2)' : '#2a2420'
                 ctx.lineWidth = 1
                 ctx.beginPath()
                 ctx.moveTo(e.source.x, e.source.y)
@@ -168,91 +207,112 @@ export default function RingExplorer() {
     }
 
     return (
-        <div className="grid gap-4 h-full" style={{ gridTemplateColumns: selectedRingData ? '260px 1fr 280px' : '260px 1fr', minHeight: 'calc(100vh - 130px)' }}>
-            {/* Ring List */}
-            <div className="card overflow-y-auto" style={{ maxHeight: 'calc(100vh - 130px)' }}>
-                <div className="section-header">Fraud Rings ({rings.length})</div>
-                <div className="space-y-1">
-                    {rings.map((r) => (
-                        <div
-                            key={r.id}
-                            onClick={() => setSelectedRing(selectedRing === r.id ? null : r.id)}
-                            className="p-3 rounded-lg cursor-pointer transition-all"
-                            style={{
-                                background: selectedRing === r.id ? 'rgba(0,212,255,0.08)' : 'transparent',
-                                border: `1px solid ${selectedRing === r.id ? 'var(--accent-cyan)' : 'transparent'}`,
-                            }}
-                        >
-                            <div className="mono text-xs font-medium">{r.id}</div>
-                            <div className="flex items-center gap-2 mt-1">
-                                <span className="text-xs px-1.5 py-0.5 rounded" style={{
-                                    background: r.type === 'hub_spoke' ? 'rgba(255,176,32,0.15)' : 'rgba(0,212,255,0.15)',
-                                    color: r.type === 'hub_spoke' ? '#FFB020' : '#00D4FF',
-                                }}>{r.type === 'hub_spoke' ? 'MULE' : 'COLLUSIVE'}</span>
-                                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{r.all_members.length} members</span>
+        <div className="space-y-4">
+            {/* Pattern Summary Cards */}
+            {dbPatterns.length > 0 && (
+                <div className="grid grid-cols-3 gap-4">
+                    {dbPatterns.slice(0, 3).map((p, i) => (
+                        <div key={i} className="card" style={{ padding: '12px 16px', borderLeft: `3px solid ${p.type === 'fan_out' ? '#FF3B5C' : '#FFB020'}` }}>
+                            <div className="flex items-center gap-2 mb-1">
+                                {p.type === 'fan_out' ? <GitBranch size={14} style={{ color: '#FF3B5C' }} /> : <TrendingUp size={14} style={{ color: '#FFB020' }} />}
+                                <span className="text-xs font-medium">{p.label}</span>
+                            </div>
+                            <div className="mono text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                {p.center_node} → {p.connected_count} connections
+                            </div>
+                            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                                ₹{(p.total_amount || 0).toLocaleString('en-IN')} across {p.txn_count} txns
                             </div>
                         </div>
                     ))}
                 </div>
-            </div>
+            )}
 
-            {/* Graph Canvas */}
-            <div className="card relative" style={{ padding: 0, overflow: 'hidden' }}>
-                <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} className="w-full h-full cursor-grab active:cursor-grabbing" />
-                <div className="absolute top-4 left-4 flex gap-3 text-xs">
-                    {[['Controller', '#FF3B5C'], ['Mule', '#FFB020'], ['Collusive', '#00D4FF']].map(([label, color]) => (
-                        <div key={label} className="flex items-center gap-1.5">
-                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
-                            <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* Ring Details */}
-            {selectedRingData && (
-                <div className="card overflow-y-auto slide-in-right" style={{ maxHeight: 'calc(100vh - 130px)' }}>
-                    <div className="mono text-sm font-bold mb-3">{selectedRing}</div>
-                    <div className="space-y-2 mb-4">
-                        <div className="flex justify-between text-xs">
-                            <span style={{ color: 'var(--text-secondary)' }}>Type</span>
-                            <span className="capitalize">{selectedRingData.type.replace('_', '-')}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                            <span style={{ color: 'var(--text-secondary)' }}>Members</span>
-                            <span>{selectedRingData.all_members.length}</span>
-                        </div>
-                        {selectedRingData.controller && (
-                            <div className="flex justify-between text-xs">
-                                <span style={{ color: 'var(--text-secondary)' }}>Controller</span>
-                                <span className="mono" style={{ color: 'var(--accent-red)' }}>{selectedRingData.controller}</span>
+            {/* Main Grid */}
+            <div className="grid gap-4 h-full" style={{ gridTemplateColumns: selectedRingData ? '260px 1fr 280px' : '260px 1fr', minHeight: 'calc(100vh - 200px)' }}>
+                {/* Ring List */}
+                <div className="card overflow-y-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+                    <div className="section-header">Fraud Rings ({rings.length})</div>
+                    <div className="space-y-1">
+                        {rings.map((r) => (
+                            <div
+                                key={r.id}
+                                onClick={() => setSelectedRing(selectedRing === r.id ? null : r.id)}
+                                className="p-3 rounded-lg cursor-pointer transition-all"
+                                style={{
+                                    background: selectedRing === r.id ? 'rgba(0,212,255,0.08)' : 'transparent',
+                                    border: `1px solid ${selectedRing === r.id ? 'var(--accent-cyan)' : 'transparent'}`,
+                                }}
+                            >
+                                <div className="mono text-xs font-medium">{r.id}</div>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-xs px-1.5 py-0.5 rounded" style={{
+                                        background: r.type === 'hub_spoke' ? 'rgba(255,176,32,0.15)' : 'rgba(0,212,255,0.15)',
+                                        color: r.type === 'hub_spoke' ? '#FFB020' : '#00D4FF',
+                                    }}>{r.type === 'hub_spoke' ? 'MULE' : 'COLLUSIVE'}</span>
+                                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{r.all_members.length} members</span>
+                                </div>
                             </div>
-                        )}
+                        ))}
                     </div>
+                </div>
 
-                    <div className="section-header">Members</div>
-                    <div className="space-y-2">
+                {/* Graph Canvas */}
+                <div className="card relative" style={{ padding: 0, overflow: 'hidden' }}>
+                    <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} className="w-full h-full cursor-grab active:cursor-grabbing" />
+                    <div className="absolute top-4 left-4 flex gap-3 text-xs">
+                        {[['Controller', '#FF3B5C'], ['Mule', '#FFB020'], ['Collusive', '#00D4FF']].map(([label, color]) => (
+                            <div key={label} className="flex items-center gap-1.5">
+                                <div style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
+                                <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
+                            </div>
+                        ))}
+                    </div>
+                    {/* Live data indicator */}
+                    {dbGraphData && dbGraphData.total_nodes > 0 && (
+                        <div className="absolute top-4 right-4 px-2 py-1 rounded text-xs" style={{ background: 'rgba(0,212,255,0.1)', color: 'var(--accent-cyan)', border: '1px solid rgba(0,212,255,0.2)' }}>
+                            +{dbGraphData.total_nodes} live nodes
+                        </div>
+                    )}
+                </div>
+
+                {/* Ring Details */}
+                {selectedRingData && (
+                    <div className="card overflow-y-auto slide-in-right" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+                        <div className="mono text-sm font-bold mb-3">{selectedRing}</div>
+                        <div className="space-y-2 mb-4">
+                            <div className="flex justify-between text-xs">
+                                <span style={{ color: 'var(--text-secondary)' }}>Type</span>
+                                <span className="capitalize">{selectedRingData.type.replace('_', '-')}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                                <span style={{ color: 'var(--text-secondary)' }}>Members</span>
+                                <span>{selectedRingData.all_members.length}</span>
+                            </div>
+                            {selectedRingData.controller && (
+                                <div className="flex justify-between text-xs">
+                                    <span style={{ color: 'var(--text-secondary)' }}>Controller</span>
+                                    <span className="mono" style={{ color: 'var(--accent-red)' }}>{selectedRingData.controller}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="section-header">Members</div>
                         {selectedRingData.all_members.map((m) => {
                             const isCtrl = m === selectedRingData.controller
-                            const risk = isCtrl ? 0.92 : 0.4 + Math.random() * 0.35
                             return (
                                 <div key={m} className="flex items-center gap-2 p-2 rounded" style={{ background: 'var(--bg-elevated)' }}>
                                     {isCtrl && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,59,92,0.15)', color: '#FF3B5C', fontSize: 9 }}>CTRL</span>}
                                     <span className="mono text-xs flex-1">{m}</span>
-                                    <div style={{ width: 50 }}>
-                                        <div className="rounded-full overflow-hidden" style={{ height: 4, background: 'rgba(255,255,255,0.06)' }}>
-                                            <div className="rounded-full" style={{ width: `${risk * 100}%`, height: '100%', background: risk > 0.7 ? '#FF3B5C' : '#FFB020' }} />
-                                        </div>
-                                    </div>
-                                    <span className="mono text-xs" style={{ color: 'var(--text-muted)', width: 28 }}>{risk.toFixed(2)}</span>
+                                    <DecisionBadge decision={isCtrl ? 'FRAUD' : 'NO_FRAUD'} size="sm" />
                                 </div>
                             )
                         })}
-                    </div>
 
-                    <button onClick={exportCSV} className="btn-secondary text-xs w-full mt-4"><Download size={14} /> Export Ring Members</button>
-                </div>
-            )}
+                        <button onClick={exportCSV} className="btn-secondary text-xs w-full mt-4"><Download size={14} /> Export Ring Members</button>
+                    </div>
+                )}
+            </div>
         </div>
     )
 }

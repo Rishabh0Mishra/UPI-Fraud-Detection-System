@@ -1,56 +1,66 @@
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getHealth } from '../../api/fraudApi'
 import { HEALTH_REFRESH_MS } from '../../config'
-import { Bell, Shield } from 'lucide-react'
-import { useState, useEffect } from 'react'
 
-export default function TopBar() {
+const sections = [
+    { id: 'monitoring', label: 'Monitoring', defaultPath: '/' },
+    { id: 'analysis', label: 'Analysis', defaultPath: '/score' },
+    { id: 'system', label: 'System', defaultPath: '/health' },
+    { id: 'enduser', label: 'End User View', defaultPath: '/qrcode' },
+]
+
+export default function TopBar({ activeSection }) {
+    const navigate = useNavigate()
     const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: HEALTH_REFRESH_MS })
-    const [uptime, setUptime] = useState(0)
     const isHealthy = health?.status === 'healthy' || health?.model_loaded
 
-    useEffect(() => {
-        if (health?.uptime_seconds) setUptime(Math.floor(health.uptime_seconds))
-    }, [health])
-
-    useEffect(() => {
-        const t = setInterval(() => setUptime((u) => u + 1), 1000)
-        return () => clearInterval(t)
-    }, [])
-
-    const formatUptime = (s) => {
-        const h = Math.floor(s / 3600)
-        const m = Math.floor((s % 3600) / 60)
-        const sec = s % 60
-        return `${h}h ${m}m ${sec}s`
-    }
-
     return (
-        <header
-            className="h-14 flex items-center justify-between px-6 shrink-0"
-            style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}
-        >
-            <div className="flex items-center gap-3">
-                <span className="text-lg font-bold">
-                    GraphFraud<span style={{ color: 'var(--accent-cyan)' }}>-UPI</span>
-                </span>
+        <div className="topnav">
+            <div className="tn-links">
+                {sections.slice(0, 2).map(s => (
+                    <div
+                        key={s.id}
+                        className={`tn-link ${activeSection === s.id ? 'active' : ''}`}
+                        onClick={() => navigate(s.defaultPath)}
+                    >
+                        {s.label}
+                    </div>
+                ))}
             </div>
-
-            <div className="flex items-center gap-2">
-                <div className={isHealthy ? 'live-dot' : ''} style={!isHealthy ? { width: 8, height: 8, background: 'var(--accent-red)', borderRadius: '50%' } : {}} />
-                <span className="text-xs font-medium" style={{ color: isHealthy ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                    {isHealthy ? 'LIVE' : 'OFFLINE'}
-                </span>
+            <div className="logo-wrap">GraphFraud</div>
+            <div className="tn-links">
+                {sections.slice(2).map(s => (
+                    <div
+                        key={s.id}
+                        className={`tn-link ${activeSection === s.id ? 'active' : ''}`}
+                        onClick={() => navigate(s.defaultPath)}
+                    >
+                        {s.label}
+                    </div>
+                ))}
             </div>
-
-            <div className="flex items-center gap-4">
-                <span className="mono text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    Uptime: {formatUptime(uptime)}
-                </span>
-                <button className="relative p-2 rounded-lg" style={{ background: 'transparent', color: 'var(--text-secondary)' }}>
-                    <Bell size={18} />
-                </button>
+            <div className="tn-right">
+                <div className="live-chip">
+                    <div className="ldot" />
+                    {isHealthy ? 'Live System Alpha' : 'Offline'}
+                </div>
+                <div className="icon-btn">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--text2)" strokeWidth="1.5">
+                        <path d="M8 2a5 5 0 015 5c0 3 1 4 1 4H2s1-1 1-4a5 5 0 015-5z"/>
+                        <path d="M9.7 13a2 2 0 01-3.4 0"/>
+                    </svg>
+                </div>
+                <div className="icon-btn">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--text2)" strokeWidth="1.5">
+                        <rect x="2" y="2" width="5" height="5" rx="1"/>
+                        <rect x="9" y="2" width="5" height="5" rx="1"/>
+                        <rect x="2" y="9" width="5" height="5" rx="1"/>
+                        <rect x="9" y="9" width="5" height="5" rx="1"/>
+                    </svg>
+                </div>
+                <div className="avatar">S</div>
             </div>
-        </header>
+        </div>
     )
 }

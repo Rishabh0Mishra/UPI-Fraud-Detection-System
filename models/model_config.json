@@ -53,7 +53,7 @@
     "receiver_category_encoded",
     "sender_vulnerability_score_direct"
   ],
-  "threshold": 0.9644809710523755,
+  "threshold": 0.9558822742136253,
   "encoding_map": {
     "transaction_type": {
       "BILL": 0,
@@ -135,27 +135,27 @@
   "smote_strategy": 0.05,
   "n_folds": 5,
   "eval_metrics": {
-    "global_pr_auc": 0.9989129850440569,
-    "global_roc_auc": 0.9999916366514765,
-    "global_f1": 0.9852297542999308,
-    "optimal_threshold": 0.9644809710523755,
-    "recall": 0.9906490649064906,
-    "precision": 0.9798694232861807,
-    "false_positive_rate": 0.000149084139865099,
-    "tp": 3602,
-    "fp": 74,
-    "fn": 34,
-    "tn": 496290,
+    "global_pr_auc": 0.9990106951962615,
+    "global_roc_auc": 0.999992467223852,
+    "global_f1": 0.9848173934408482,
+    "optimal_threshold": 0.9558822742136253,
+    "recall": 0.9900990099009901,
+    "precision": 0.9795918367346939,
+    "false_positive_rate": 0.00015109879040381654,
+    "tp": 3600,
+    "fp": 75,
+    "fn": 36,
+    "tn": 496289,
     "fold_pr_aucs": [
-      0.9995103057870602,
-      0.9979942734867367,
-      0.9995991529134935,
-      0.9988858577000901,
-      0.9992939214278467
+      0.9995187477615788,
+      0.997978479066639,
+      0.9996680897370008,
+      0.9989580004648929,
+      0.9992375754059841
     ],
-    "fold_mean_pr_auc": 0.9990567022630454,
-    "fold_std_pr_auc": 0.0005855296007443867
+    "fold_mean_pr_auc": 0.9990721784872191,
+    "fold_std_pr_auc": 0.0005985157505889395
   },
-  "best_iteration": 273,
+  "best_iteration": 275,
   "fraud_rate": 0.007272
 }
