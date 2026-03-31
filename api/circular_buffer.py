@@ -131,9 +131,18 @@ def init_live_db():
             top_risky_handles      TEXT,
 
             unique_senders         INTEGER DEFAULT 0,
-            unique_receivers       INTEGER DEFAULT 0
+            unique_receivers       INTEGER DEFAULT 0,
+
+            active_monitoring      INTEGER DEFAULT 0
         )
     """)
+
+    # Add column if missing (for existing databases)
+    try:
+        c.execute("ALTER TABLE dashboard_aggregates ADD COLUMN active_monitoring INTEGER DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
 
     # ── Indexes ──
     c.execute("CREATE INDEX IF NOT EXISTS idx_lt_timestamp ON live_transactions(timestamp DESC)")
@@ -465,6 +474,14 @@ def compute_and_store_aggregates():
 
         top_indicators = sorted(indicator_counts.items(), key=lambda x: -x[1])[:10]
 
+        # Active monitoring: count high-risk (score >= 60) transactions currently in buffer
+        c.execute(f"""
+            SELECT COUNT(*) as active_count FROM live_transactions
+            WHERE {where} AND internal_risk_score >= 60 AND transaction_id IS NOT NULL
+        """, params)
+        active_row = c.fetchone()
+        active_monitoring = active_row["active_count"] if active_row else 0
+
         c.execute("""
             INSERT INTO dashboard_aggregates (
                 calculation_timestamp, time_window,
@@ -472,8 +489,9 @@ def compute_and_store_aggregates():
                 fraud_rate, average_risk_score,
                 total_amount, blocked_amount,
                 top_fraud_indicators,
-                unique_senders, unique_receivers
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                unique_senders, unique_receivers,
+                active_monitoring
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             now.isoformat(), window,
             total, no_fraud, fraud,
@@ -481,6 +499,7 @@ def compute_and_store_aggregates():
             round(row["total_amount"] or 0, 2), round(row["blocked_amount"] or 0, 2),
             json.dumps(top_indicators),
             row["unique_senders"] or 0, row["unique_receivers"] or 0,
+            active_monitoring,
         ))
 
     conn.commit()
@@ -504,6 +523,7 @@ def get_latest_aggregates(window: str = "1_HOUR") -> dict:
             "fraud_rate": 0, "average_risk_score": 0,
             "total_amount": 0, "blocked_amount": 0,
             "top_fraud_indicators": [], "unique_senders": 0, "unique_receivers": 0,
+            "active_monitoring": 0,
         }
 
     d = dict(row)

@@ -1,116 +1,79 @@
 import { useState, useEffect } from 'react'
 
 /**
- * Animated SVG arc gauge for risk scores (0–100).
- * Arc spans from 7 o'clock to 5 o'clock (220° sweep around bottom).
+ * Binary classification shield — FRAUD or NOT FRAUD.
+ * Replaces the old numeric arc gauge.
+ * Threshold: score >= 50 → FRAUD, score < 50 → NOT FRAUD.
  */
-export default function RiskGauge({ score = 0, size = 120 }) {
-    const [animatedScore, setAnimatedScore] = useState(0)
+const THRESHOLD = 50
 
-    useEffect(() => {
-        let frame
-        const start = performance.now()
-        const duration = 1000
-        const animate = (now) => {
-            const progress = Math.min((now - start) / duration, 1)
-            // Ease out cubic
-            const eased = 1 - Math.pow(1 - progress, 3)
-            setAnimatedScore(Math.round(eased * score))
-            if (progress < 1) frame = requestAnimationFrame(animate)
-        }
-        frame = requestAnimationFrame(animate)
-        return () => cancelAnimationFrame(frame)
-    }, [score])
+export default function RiskGauge({ score = 0, size = 120 }) {
+    const [visible, setVisible] = useState(false)
+    useEffect(() => { const t = setTimeout(() => setVisible(true), 100); return () => clearTimeout(t) }, [])
+
+    const isFraud = score >= THRESHOLD
+    const color = isFraud ? '#FF3B5C' : '#00E5A0'
+    const label = isFraud ? 'FRAUD' : 'NOT FRAUD'
+    const iconPath = isFraud
+        ? 'M18 6L6 18M6 6l12 12' // X mark
+        : 'M5 13l4 4L19 7'       // Checkmark
 
     const cx = size / 2
     const cy = size / 2
-    const r = (size / 2) - 12
-    const startAngle = -130
-    const endAngle = 130
-    const totalSweep = endAngle - startAngle // 260°
-    const filledAngle = startAngle + (animatedScore / 100) * totalSweep
-
-    const polarToCartesian = (angle) => {
-        const rad = (angle - 90) * Math.PI / 180
-        return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
-    }
-
-    const describeArc = (sAngle, eAngle) => {
-        const s = polarToCartesian(sAngle)
-        const e = polarToCartesian(eAngle)
-        const lg = (eAngle - sAngle) > 180 ? 1 : 0
-        return `M ${s.x} ${s.y} A ${r} ${r} 0 ${lg} 1 ${e.x} ${e.y}`
-    }
-
-    // Colour interpolation: green (0-30), amber (30-60), red (60-100)
-    const getColor = (s) => {
-        if (s < 30) return '#00E5A0'
-        if (s < 60) return '#FFB020'
-        return '#FF3B5C'
-    }
-
-    const getLabel = (s) => {
-        if (s < 20) return 'SAFE'
-        if (s < 40) return 'LOW'
-        if (s < 60) return 'CAUTION'
-        if (s < 80) return 'HIGH'
-        return 'CRITICAL'
-    }
-
-    const color = getColor(animatedScore)
-    const label = getLabel(animatedScore)
+    const shieldR = size * 0.38
 
     return (
-        <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
-            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-                {/* Background arc */}
+        <div style={{
+            display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+            opacity: visible ? 1 : 0, transform: visible ? 'scale(1)' : 'scale(0.7)',
+            transition: 'all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        }}>
+            <svg width={size} height={size} viewBox="0 0 120 120">
+                {/* Glow */}
+                <defs>
+                    <filter id="shieldGlow">
+                        <feGaussianBlur stdDeviation="4" result="blur" />
+                        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                    </filter>
+                </defs>
+
+                {/* Shield shape */}
                 <path
-                    d={describeArc(startAngle, endAngle)}
-                    fill="none"
-                    stroke="rgba(255,255,255,0.06)"
-                    strokeWidth={10}
-                    strokeLinecap="round"
+                    d="M60 15 L95 35 L95 65 Q95 95 60 108 Q25 95 25 65 L25 35 Z"
+                    fill={`${color}15`}
+                    stroke={color}
+                    strokeWidth="2.5"
+                    filter="url(#shieldGlow)"
+                    style={{ transition: 'all 0.5s' }}
                 />
-                {/* Filled arc */}
-                {animatedScore > 0 && (
+
+                {/* Icon (check or X) */}
+                <g transform="translate(36, 38) scale(2)">
                     <path
-                        d={describeArc(startAngle, filledAngle)}
+                        d={iconPath}
                         fill="none"
                         stroke={color}
-                        strokeWidth={10}
+                        strokeWidth="2.5"
                         strokeLinecap="round"
+                        strokeLinejoin="round"
                         style={{
-                            filter: `drop-shadow(0 0 6px ${color}40)`,
-                            transition: 'stroke 0.3s',
+                            strokeDasharray: 50,
+                            strokeDashoffset: visible ? 0 : 50,
+                            transition: 'stroke-dashoffset 0.8s ease 0.3s',
                         }}
                     />
-                )}
-                {/* Score number */}
-                <text
-                    x={cx}
-                    y={cy - 4}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    style={{
-                        fontFamily: "'JetBrains Mono', monospace",
-                        fontSize: size * 0.28,
-                        fontWeight: 700,
-                        fill: color,
-                    }}
-                >
-                    {animatedScore}
-                </text>
+                </g>
+
                 {/* Label */}
                 <text
-                    x={cx}
-                    y={cy + size * 0.17}
+                    x="60"
+                    y="100"
                     textAnchor="middle"
-                    dominantBaseline="central"
                     style={{
                         fontFamily: "'Inter', sans-serif",
-                        fontSize: size * 0.1,
-                        fontWeight: 600,
-                        fill: 'rgba(255,255,255,0.5)',
+                        fontSize: isFraud ? 12 : 10,
+                        fontWeight: 700,
+                        fill: color,
                         letterSpacing: '1.5px',
                     }}
                 >

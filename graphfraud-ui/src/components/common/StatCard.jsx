@@ -1,24 +1,31 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { LineChart, Line, ResponsiveContainer } from 'recharts'
 
 export default function StatCard({ title, value, subtitle, color = 'var(--accent-cyan)', icon: Icon, sparklineData }) {
     const [displayVal, setDisplayVal] = useState(0)
+    const isNumeric = typeof value === 'number' && !isNaN(value)
+    const prevValue = useRef(0)
 
     useEffect(() => {
-        const target = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.]/g, '')) || 0
-        if (target === 0) return
-        const duration = 1500
+        if (!isNumeric) return
+        const target = value
+        const from = prevValue.current
+        if (target === from) return
+        const duration = 1200
         const start = performance.now()
         const tick = (now) => {
             const elapsed = now - start
             const progress = Math.min(elapsed / duration, 1)
             const eased = 1 - Math.pow(1 - progress, 3)
-            setDisplayVal(Math.floor(target * eased))
+            setDisplayVal(Math.floor(from + (target - from) * eased))
             if (progress < 1) requestAnimationFrame(tick)
-            else setDisplayVal(target)
+            else {
+                setDisplayVal(target)
+                prevValue.current = target
+            }
         }
         requestAnimationFrame(tick)
-    }, [value])
+    }, [value, isNumeric])
 
     const formatNum = (n) => {
         if (typeof n === 'number') return n.toLocaleString('en-IN')
@@ -30,7 +37,7 @@ export default function StatCard({ title, value, subtitle, color = 'var(--accent
             <div className="flex items-start justify-between">
                 <div>
                     <div className="text-xs font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--text-secondary)' }}>{title}</div>
-                    <div className="mono text-2xl font-bold" style={{ color }}>{formatNum(displayVal)}</div>
+                    <div className="mono text-2xl font-bold" style={{ color }}>{isNumeric ? formatNum(displayVal) : value}</div>
                     {subtitle && <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{subtitle}</div>}
                 </div>
                 {Icon && <Icon size={20} style={{ color, opacity: 0.5 }} />}

@@ -1,105 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { generateMockTransaction } from '../api/mockData'
-import { getLiveFeedRecent } from '../api/fraudApi'
-import { WS_URL, LIVE_FEED_INTERVAL_MS } from '../config'
+import { useState, useRef } from 'react'
+import { useLiveFeed } from '../context/LiveFeedContext'
 import DecisionBadge from '../components/common/DecisionBadge'
-import { Play, Pause, Trash2, Search, Radio, Shield, ShieldAlert } from 'lucide-react'
+import { Play, Pause, Trash2, Search, Radio } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 export default function LiveFeed() {
-    const [transactions, setTransactions] = useState([])
-    const [isLive, setIsLive] = useState(true)
+    // All persistent state comes from the context (survives page navigation)
+    const { transactions, stats, isLive, setIsLive, wsConnected, clearFeed } = useLiveFeed()
+
+    // Local-only UI state (filter / search don't need to persist)
     const [filter, setFilter] = useState('ALL')
     const [search, setSearch] = useState('')
-    const [stats, setStats] = useState({ scored: 0, fraud: 0, noFraud: 0, avgLatency: 0 })
-    const [wsConnected, setWsConnected] = useState(false)
     const scrollRef = useRef(null)
-    const wsRef = useRef(null)
-
-    // Load initial data from DB
-    useEffect(() => {
-        getLiveFeedRecent(100).then(data => {
-            if (data?.transactions?.length > 0) {
-                setTransactions(data.transactions)
-                const fraud = data.transactions.filter(t => t.classification === 'FRAUD').length
-                setStats({
-                    scored: data.transactions.length,
-                    fraud,
-                    noFraud: data.transactions.length - fraud,
-                    avgLatency: 0,
-                })
-            }
-        }).catch(() => {})
-    }, [])
-
-    // WebSocket for real-time updates
-    useEffect(() => {
-        if (!isLive) {
-            if (wsRef.current) { wsRef.current.close(); wsRef.current = null }
-            setWsConnected(false)
-            return
-        }
-
-        let ws
-        let fallbackInterval
-
-        try {
-            ws = new WebSocket(WS_URL)
-            wsRef.current = ws
-
-            ws.onopen = () => {
-                setWsConnected(true)
-                console.log('WebSocket connected')
-            }
-
-            ws.onmessage = (event) => {
-                try {
-                    const txn = JSON.parse(event.data)
-                    setTransactions(prev => [txn, ...prev.slice(0, 199)])
-                    setStats(prev => ({
-                        scored: prev.scored + 1,
-                        fraud: prev.fraud + (txn.classification === 'FRAUD' ? 1 : 0),
-                        noFraud: prev.noFraud + (txn.classification !== 'FRAUD' ? 1 : 0),
-                        avgLatency: parseFloat(((prev.avgLatency * prev.scored + (txn.processing_time_ms || txn.latency_ms || 0)) / (prev.scored + 1)).toFixed(1)),
-                    }))
-                } catch (e) { console.error('WS parse error:', e) }
-            }
-
-            ws.onclose = () => {
-                setWsConnected(false)
-                // Fallback to polling with mock data
-                fallbackInterval = setInterval(() => {
-                    const txn = generateMockTransaction()
-                    setTransactions(prev => [txn, ...prev.slice(0, 199)])
-                    setStats(prev => ({
-                        scored: prev.scored + 1,
-                        fraud: prev.fraud + (txn.classification === 'FRAUD' ? 1 : 0),
-                        noFraud: prev.noFraud + (txn.classification !== 'FRAUD' ? 1 : 0),
-                        avgLatency: parseFloat(((prev.avgLatency * prev.scored + txn.latency_ms) / (prev.scored + 1)).toFixed(1)),
-                    }))
-                }, LIVE_FEED_INTERVAL_MS + Math.random() * 1000)
-            }
-
-            ws.onerror = () => { ws.close() }
-        } catch (e) {
-            // WebSocket not available, use polling
-            fallbackInterval = setInterval(() => {
-                const txn = generateMockTransaction()
-                setTransactions(prev => [txn, ...prev.slice(0, 199)])
-                setStats(prev => ({
-                    scored: prev.scored + 1,
-                    fraud: prev.fraud + (txn.classification === 'FRAUD' ? 1 : 0),
-                    noFraud: prev.noFraud + (txn.classification !== 'FRAUD' ? 1 : 0),
-                    avgLatency: parseFloat(((prev.avgLatency * prev.scored + txn.latency_ms) / (prev.scored + 1)).toFixed(1)),
-                }))
-            }, LIVE_FEED_INTERVAL_MS + Math.random() * 1000)
-        }
-
-        return () => {
-            if (ws) ws.close()
-            if (fallbackInterval) clearInterval(fallbackInterval)
-        }
-    }, [isLive])
 
     const filtered = transactions.filter((t) => {
         const cls = t.classification || (t.decision === 'ALLOW' ? 'NO_FRAUD' : 'FRAUD')
@@ -160,7 +72,7 @@ export default function LiveFeed() {
                     />
                 </div>
 
-                <button onClick={() => { setTransactions([]); setStats({ scored: 0, fraud: 0, noFraud: 0, avgLatency: 0 }) }} className="btn-secondary text-xs">
+                <button onClick={clearFeed} className="btn-secondary text-xs">
                     <Trash2 size={14} /> Clear
                 </button>
             </div>
@@ -174,7 +86,7 @@ export default function LiveFeed() {
                     <span className="mono font-medium" style={{ color: 'var(--accent-green)' }}>{stats.noFraud}</span> safe
                 </span>
                 <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    <span className="mono font-medium" style={{ color: 'var(--accent-red)' }}>{stats.fraud}</span> fraud ({stats.scored ? ((stats.fraud / stats.scored) * 100).toFixed(1) : 0}%)
+                    <span className="mono font-medium" style={{ color: 'var(--accent-red)' }}>{stats.fraud}</span> fraud
                 </span>
                 <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                     Avg latency: <span className="mono font-medium">{stats.avgLatency}ms</span>

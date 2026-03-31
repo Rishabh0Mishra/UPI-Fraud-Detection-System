@@ -629,6 +629,74 @@ def check_fraud_reports(identifier: str) -> dict:
         conn.close()
 
 
+# ────────────────────────────────────────────────────────────────────
+# VOUCH (Mark as Safe) — opposite of fraud report
+# ────────────────────────────────────────────────────────────────────
+
+def submit_vouch(
+    identifier: str,
+    vouch_type: str = 'UPI_ID',
+    user_id: str = 'anonymous',
+) -> dict:
+    """
+    Vouch an identifier as safe — decrements report counts.
+    If report_count drops to 0, removes the summary row entirely.
+    """
+    norm = identifier.lower().strip()
+    if not norm:
+        return {'status': 'error', 'message': 'No identifier provided'}
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "SELECT report_count, confirmed_fraud_count FROM fraud_report_summary WHERE fraud_identifier = ?",
+            (norm,)
+        )
+        row = cursor.fetchone()
+
+        if not row:
+            return {
+                'status': 'ok',
+                'message': 'No existing reports found — already clean.',
+                'identifier': norm,
+            }
+
+        new_report_count = max(0, row[0] - 1)
+        new_confirmed = max(0, row[1] - 1)
+
+        if new_report_count <= 0:
+            # Clean slate — remove the summary row
+            cursor.execute(
+                "DELETE FROM fraud_report_summary WHERE fraud_identifier = ?",
+                (norm,)
+            )
+        else:
+            cursor.execute("""
+                UPDATE fraud_report_summary SET
+                    report_count = ?,
+                    confirmed_fraud_count = ?
+                WHERE fraud_identifier = ?
+            """, (new_report_count, new_confirmed, norm))
+
+        conn.commit()
+
+        return {
+            'status': 'vouched',
+            'message': 'Thank you for verifying. Risk score has been reduced.',
+            'identifier': norm,
+            'new_report_count': new_report_count,
+        }
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error submitting vouch: {e}")
+        return {'status': 'error', 'message': f'Failed to submit vouch: {str(e)}'}
+    finally:
+        conn.close()
+
+
 # Legacy wrapper — used by existing code
 def report_upi_id(
     upi_id: str,

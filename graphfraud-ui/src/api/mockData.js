@@ -104,22 +104,29 @@ export const generateMockStats = () => {
     }
 }
 
+// Stable mock counter — only increments, never jumps down
+let _mockBaseTotal = 49500 + Math.floor(Math.random() * 500)
+let _mockBaseFraud = Math.floor(_mockBaseTotal * 0.015)
+
 export const generateMockDashboardStats = () => {
-    const total = 1200 + Math.floor(Math.random() * 300)
-    const fraud = Math.floor(total * (0.03 + Math.random() * 0.04))
-    const noFraud = total - fraud
+    // Simulate slow growth each poll
+    _mockBaseTotal += Math.floor(Math.random() * 5)
+    _mockBaseFraud += Math.random() < 0.15 ? 1 : 0
+    const noFraud = _mockBaseTotal - _mockBaseFraud
+    const activeMonitoring = Math.floor(_mockBaseFraud * 0.35) + 12
     return {
-        time_window: '1_HOUR',
-        total_transactions: total,
+        time_window: 'ALL_TIME',
+        total_transactions: _mockBaseTotal,
         no_fraud_count: noFraud,
-        fraud_count: fraud,
-        fraud_rate: parseFloat((fraud / total).toFixed(4)),
-        average_risk_score: parseFloat((15 + Math.random() * 25).toFixed(2)),
-        total_amount: Math.floor(total * 1200),
-        blocked_amount: Math.floor(fraud * 5000),
+        fraud_count: _mockBaseFraud,
+        fraud_rate: parseFloat((_mockBaseFraud / _mockBaseTotal).toFixed(4)),
+        average_risk_score: parseFloat((18 + Math.random() * 4).toFixed(2)),
+        total_amount: Math.floor(_mockBaseTotal * 1200),
+        blocked_amount: Math.floor(_mockBaseFraud * 5000),
         top_fraud_indicators: [['name_mismatch_critical', 12], ['unverified_reports_few', 8], ['phishing_pattern', 5]],
-        unique_senders: Math.floor(total * 0.85),
-        unique_receivers: Math.floor(total * 0.6),
+        unique_senders: Math.floor(_mockBaseTotal * 0.85),
+        unique_receivers: Math.floor(_mockBaseTotal * 0.6),
+        active_monitoring: activeMonitoring,
     }
 }
 

@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { analyseUPIId, getRiskUiConfig, fetchFraudReports } from '../../utils/fraudAnalysis'
+import { ShieldCheck } from 'lucide-react'
+import { analyseUPIId, getRiskUiConfig, fetchFraudReports, removeReportedItem, addVouchedItem } from '../../utils/fraudAnalysis'
+import { vouchSafe } from '../../api/fraudApi'
 import RiskGauge from '../common/RiskGauge'
 import SignalList from '../common/SignalList'
 
@@ -8,10 +10,12 @@ export default function UPIChecker({ onReport }) {
     const [result, setResult] = useState(null)
     const [reportData, setReportData] = useState(null)
     const [loading, setLoading] = useState(false)
+    const [vouched, setVouched] = useState(false)
 
     const handleCheck = async () => {
         if (!upiId.trim()) return
         setLoading(true)
+        setVouched(false)
         const analysisResult = analyseUPIId(upiId.trim())
 
         // If format and handle passed, also check fraud reports from backend
@@ -20,12 +24,10 @@ export default function UPIChecker({ onReport }) {
                 const reports = await fetchFraudReports(upiId.trim())
                 if (reports.found && reports.report_count > 0) {
                     setReportData(reports)
-                    // Add report warning to signals
                     analysisResult.signals.push({
                         level: 'danger',
                         text: `⚠️ This UPI ID has been reported ${reports.report_count} time(s) as fraudulent.\nConfirmed fraud: ${reports.confirmed_fraud_count || 0} | Total lost: ₹${(reports.total_amount_lost || 0).toLocaleString('en-IN')}`
                     })
-                    // Add risk adjustment
                     analysisResult.riskScore = Math.min(100, analysisResult.riskScore + (reports.risk_adjustment || 0))
                 }
             } catch (e) {
@@ -37,7 +39,18 @@ export default function UPIChecker({ onReport }) {
         setLoading(false)
     }
 
-    const reset = () => { setResult(null); setUpiId(''); setReportData(null) }
+    const reset = () => { setResult(null); setUpiId(''); setReportData(null); setVouched(false) }
+
+    const handleVouch = async () => {
+        if (!result?.upiId) return
+        removeReportedItem(result.upiId)
+        addVouchedItem(result.upiId)
+        await vouchSafe(result.upiId, 'UPI_ID')
+        // Re-run analysis so score updates immediately
+        const updated = analyseUPIId(result.upiId)
+        setResult(updated)
+        setVouched(true)
+    }
 
     if (result) {
         const rs = result.riskScore
@@ -50,7 +63,7 @@ export default function UPIChecker({ onReport }) {
                 <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 16 }}>{ui.message}</p>
                 <div style={{ display: 'flex', justifyContent: 'center', margin: '16px 0' }}><RiskGauge score={rs} size={130} /></div>
 
-                {/* Info table — only show if we have valid parts */}
+                {/* Info table */}
                 <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginBottom: 16, fontSize: 15 }}>
                     {[
                         ['UPI ID', result.upiId],
@@ -84,7 +97,7 @@ export default function UPIChecker({ onReport }) {
 
                 <SignalList signals={result.signals} />
 
-                {rs <= 40 && !isFormatOrHandleError && (
+                {!ui.isFraud && !isFormatOrHandleError && (
                     <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginTop: 16 }}>
                         <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>✓ VERIFICATION CHECKLIST:</p>
                         <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Before proceeding, confirm:</p>
@@ -100,7 +113,7 @@ export default function UPIChecker({ onReport }) {
                         </p>
                     </div>
                 )}
-                {rs > 60 && (
+                {ui.isFraud && (
                     <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 16, lineHeight: 1.7 }}>
                         This UPI ID has patterns commonly seen in scam accounts. Do not transfer money to this ID.
                     </p>
@@ -109,12 +122,21 @@ export default function UPIChecker({ onReport }) {
                     <button onClick={() => onReport?.({ item: result.upiId, type: 'UPI ID', risk: rs })}
                         className="btn-secondary"
                         style={{
-                            flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140,
-                            ...(rs > 60 ? { background: 'rgba(255,59,92,0.1)', color: 'var(--accent-red)', border: '1px solid rgba(255,59,92,0.2)' } : {})
+                            flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120,
+                            ...(ui.isFraud ? { background: 'rgba(255,59,92,0.1)', color: 'var(--accent-red)', border: '1px solid rgba(255,59,92,0.2)' } : {})
                         }}>
-                        {rs > 60 ? '🚨 Report as Fraud' : rs > 30 ? '⚠️ Report as Suspicious' : 'ℹ️ Report if suspicious'}
+                        {ui.isFraud ? '🚨 Report as Fraud' : '⚠️ Report as Suspicious'}
                     </button>
-                    <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>Check Another</button>
+                    {vouched ? (
+                        <button disabled className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, background: 'rgba(0,229,160,0.1)', color: '#00E5A0', border: '1px solid rgba(0,229,160,0.3)' }}>
+                            ✅ Marked as Safe
+                        </button>
+                    ) : (
+                        <button onClick={handleVouch} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, color: '#00E5A0' }}>
+                            <ShieldCheck size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Mark as Safe
+                        </button>
+                    )}
+                    <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120 }}>Check Another</button>
                 </div>
             </div>
         )

@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getStats, getDashboardStats, getDashboardRecentAlerts } from '../api/fraudApi'
-import { generateHourlyData, generateMockTransaction } from '../api/mockData'
+import { getDashboardStats, getDashboardChartData, getDashboardRecentAlerts } from '../api/fraudApi'
+import { generateMockTransaction } from '../api/mockData'
 import { STATS_REFRESH_MS } from '../config'
 import StatCard from '../components/common/StatCard'
 import DecisionBadge from '../components/common/DecisionBadge'
@@ -12,18 +12,18 @@ import DecisionPieChart from '../components/charts/DecisionPieChart'
 import { ShieldAlert, ShieldCheck, Activity, X, TrendingUp } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
-const hourlyData = generateHourlyData()
-
 export default function Dashboard() {
-    const { data: stats, isLoading, error, refetch } = useQuery({
-        queryKey: ['stats'],
-        queryFn: getStats,
+    // DB-backed ALL_TIME stats — the actual 50k entries
+    const { data: dashStats, isLoading, error, refetch } = useQuery({
+        queryKey: ['dashboardStats'],
+        queryFn: () => getDashboardStats('ALL_TIME'),
         refetchInterval: STATS_REFRESH_MS,
     })
 
-    const { data: dashStats } = useQuery({
-        queryKey: ['dashboardStats'],
-        queryFn: () => getDashboardStats('ALL_TIME'),
+    // Live chart data from DB (replaces static mock)
+    const { data: chartData } = useQuery({
+        queryKey: ['dashboardChartData'],
+        queryFn: () => getDashboardChartData(24),
         refetchInterval: STATS_REFRESH_MS,
     })
 
@@ -38,11 +38,14 @@ export default function Dashboard() {
     if (isLoading) return <LoadingSpinner text="Loading dashboard..." />
     if (error) return <ErrorBanner message={error.message} onRetry={refetch} />
 
-    // Use binary stats from API, with fallback
-    const totalScored = stats?.total_scored || 0
-    const totalFraud = stats?.total_fraud || stats?.total_blocked || 0
-    const totalNoFraud = stats?.total_no_fraud || stats?.total_allowed || 0
-    const fraudRate = stats?.fraud_rate || (totalScored > 0 ? totalFraud / totalScored : 0)
+    // Use DB-backed aggregate stats (not in-memory session counter)
+    const totalTransactions = dashStats?.total_transactions || 0
+    const totalNoFraud = dashStats?.no_fraud_count || 0
+    const totalFraud = dashStats?.fraud_count || 0
+    const activeMonitoring = dashStats?.active_monitoring || 0
+
+    // Live hourly trend from DB
+    const hourlyTrend = chartData?.hourly_trend || []
 
     const recentAlerts = recentAlertsData?.alerts || Array.from({ length: 10 }, () => {
         const t = generateMockTransaction()
@@ -55,12 +58,12 @@ export default function Dashboard() {
 
     return (
         <div className="space-y-6">
-            {/* Stat Cards — Binary Classification */}
+            {/* Stat Cards — DB-backed Binary Classification */}
             <div className="grid grid-cols-4 gap-4">
-                <StatCard title="Total Transactions" value={totalScored} subtitle="+234 last hour" color="var(--accent-cyan)" icon={Activity} sparklineData={sparkline(400)} />
-                <StatCard title="No Fraud" value={totalNoFraud} subtitle={`${((1 - fraudRate) * 100).toFixed(1)}% safe`} color="var(--accent-green)" icon={ShieldCheck} sparklineData={sparkline(350)} />
-                <StatCard title="Fraud Detected" value={totalFraud} subtitle={`${(fraudRate * 100).toFixed(2)}% fraud rate`} color="var(--accent-red)" icon={ShieldAlert} sparklineData={sparkline(8)} />
-                <StatCard title="Fraud Rate" value={`${(fraudRate * 100).toFixed(2)}%`} subtitle="Binary threshold: 50" color="var(--accent-amber)" icon={TrendingUp} sparklineData={sparkline(5)} />
+                <StatCard title="Total Transactions" value={totalTransactions} subtitle="Analyzed in real-time" color="var(--accent-cyan)" icon={Activity} sparklineData={sparkline(400)} />
+                <StatCard title="NO FRAUD" value={totalNoFraud} subtitle="Classified secure" color="var(--accent-green)" icon={ShieldCheck} sparklineData={sparkline(350)} />
+                <StatCard title="FRAUD" value={totalFraud} subtitle="Identified threats" color="var(--accent-red)" icon={ShieldAlert} sparklineData={sparkline(8)} />
+                <StatCard title="Active Monitoring" value={activeMonitoring} subtitle="Continuous pattern matching" color="var(--accent-amber)" icon={TrendingUp} sparklineData={sparkline(5)} />
             </div>
 
             {/* Charts Row */}
@@ -73,7 +76,7 @@ export default function Dashboard() {
                             <span className="text-xs font-medium" style={{ color: 'var(--accent-cyan)' }}>LIVE</span>
                         </div>
                     </div>
-                    <FraudTrendChart data={hourlyData} />
+                    <FraudTrendChart data={hourlyTrend} />
                 </div>
                 <div className="card flex flex-col items-center justify-center">
                     <h3 className="font-semibold text-sm mb-4">Classification Split</h3>

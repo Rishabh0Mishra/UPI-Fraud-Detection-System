@@ -1,14 +1,28 @@
 import { useState } from 'react'
-import { analyseLink, getRiskUiConfig } from '../../utils/fraudAnalysis'
+import { ShieldCheck } from 'lucide-react'
+import { analyseLink, getRiskUiConfig, removeReportedItem, addVouchedItem } from '../../utils/fraudAnalysis'
+import { vouchSafe } from '../../api/fraudApi'
 import RiskGauge from '../common/RiskGauge'
 import SignalList from '../common/SignalList'
 
 export default function LinkChecker({ onReport }) {
     const [url, setUrl] = useState('')
     const [result, setResult] = useState(null)
+    const [vouched, setVouched] = useState(false)
 
-    const handleCheck = () => { if (!url.trim()) return; setResult(analyseLink(url.trim())) }
-    const reset = () => { setResult(null); setUrl('') }
+    const handleCheck = () => { if (!url.trim()) return; setResult(analyseLink(url.trim())); setVouched(false) }
+    const reset = () => { setResult(null); setUrl(''); setVouched(false) }
+
+    const handleVouch = async () => {
+        if (!result?.url) return
+        removeReportedItem(result.url)
+        addVouchedItem(result.url)
+        await vouchSafe(result.url, 'URL')
+        // Re-run analysis so score updates immediately
+        const updated = analyseLink(result.url)
+        setResult(updated)
+        setVouched(true)
+    }
 
     if (result) {
         const rs = result.riskScore
@@ -32,32 +46,40 @@ export default function LinkChecker({ onReport }) {
                     ))}
                 </div>
                 <SignalList signals={result.signals} />
-                {rs <= 40 && (
+                {!ui.isFraud && (
                     <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginTop: 16 }}>
                         <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>✓ VERIFICATION CHECKLIST:</p>
                         <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Before proceeding, confirm:</p>
                         <ul style={{ color: 'var(--text-secondary)', fontSize: 13, paddingLeft: 18, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <li>I recognize this payee/merchant</li>
-                            <li>The payee name matches the business/person</li>
-                            <li>I initiated this transaction</li>
-                            <li>The amount is correct</li>
-                            <li>I trust this recipient</li>
+                            <li>I recognize this website</li>
+                            <li>The URL matches the expected domain</li>
+                            <li>I wasn't sent this link unsolicited</li>
+                            <li>I won't enter sensitive information</li>
                         </ul>
                         <p style={{ color: 'var(--accent-cyan)', fontSize: 13, marginTop: 12, fontWeight: 500 }}>
-                            ⚠️ Never pay based on phone calls or messages asking you to make "urgent" payments
+                            ⚠️ Never enter OTP, PIN, or passwords on unfamiliar websites
                         </p>
                     </div>
                 )}
-                {rs > 60 && (
+                {ui.isFraud && (
                     <button disabled style={{ width: '100%', marginTop: 16, padding: '14px 20px', background: 'rgba(255,59,92,0.15)', color: 'var(--accent-red)', border: '1px solid rgba(255,59,92,0.3)', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'not-allowed', opacity: 0.9 }} title="We recommend not visiting this link">
                         🚫 DO NOT VISIT THIS LINK
                     </button>
                 )}
                 <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-                    <button onClick={() => onReport?.({ item: result.url, type: 'Link / URL', risk: rs })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>
-                        {rs > 60 ? '🚨 Report to confirm' : rs > 30 ? '⚠️ Report as Suspicious' : 'ℹ️ Report if suspicious'}
+                    <button onClick={() => onReport?.({ item: result.url, type: 'Link / URL', risk: rs })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120 }}>
+                        {ui.isFraud ? '🚨 Report to confirm' : '⚠️ Report as Suspicious'}
                     </button>
-                    <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>Check Another</button>
+                    {vouched ? (
+                        <button disabled className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, background: 'rgba(0,229,160,0.1)', color: '#00E5A0', border: '1px solid rgba(0,229,160,0.3)' }}>
+                            ✅ Marked as Safe
+                        </button>
+                    ) : (
+                        <button onClick={handleVouch} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, color: '#00E5A0' }}>
+                            <ShieldCheck size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Mark as Safe
+                        </button>
+                    )}
+                    <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120 }}>Check Another</button>
                 </div>
             </div>
         )

@@ -26,6 +26,83 @@ export const addReportedItem = (item, type) => {
     }
 }
 
+export const removeReportedItem = (item) => {
+    const items = getReportedItems()
+    const normalised = item.toLowerCase().trim()
+    const filtered = items.filter((r) => r.item !== normalised)
+    localStorage.setItem(REPORTED_ITEMS_KEY, JSON.stringify(filtered))
+}
+
+/* ── Vouched Items Store (persisted in localStorage) ── */
+const VOUCHED_ITEMS_KEY = 'vouched_safe_items'
+
+export const addVouchedItem = (item) => {
+    const normalised = item.toLowerCase().trim()
+    try {
+        const store = JSON.parse(localStorage.getItem(VOUCHED_ITEMS_KEY) || '{}')
+        store[normalised] = (store[normalised] || 0) + 1
+        localStorage.setItem(VOUCHED_ITEMS_KEY, JSON.stringify(store))
+    } catch { /* ignore */ }
+}
+
+export const getVouchCount = (item) => {
+    const normalised = item.toLowerCase().trim()
+    try {
+        const store = JSON.parse(localStorage.getItem(VOUCHED_ITEMS_KEY) || '{}')
+        return store[normalised] || 0
+    } catch { return 0 }
+}
+
+export const clearVouchedItem = (item) => {
+    const normalised = item.toLowerCase().trim()
+    try {
+        const store = JSON.parse(localStorage.getItem(VOUCHED_ITEMS_KEY) || '{}')
+        delete store[normalised]
+        localStorage.setItem(VOUCHED_ITEMS_KEY, JSON.stringify(store))
+    } catch { /* ignore */ }
+}
+
+export const getLocalReportCount = (item) => {
+    const normalised = item.toLowerCase().trim()
+    try {
+        const reports = JSON.parse(localStorage.getItem('fraud_reports') || '[]')
+        return reports.filter(r => r.item?.toLowerCase().trim() === normalised).length
+    } catch { return 0 }
+}
+
+const VOUCH_DEDUCTION_PER_CLICK = 15
+const REPORT_BOOST_PER_COUNT = 15
+
+/**
+ * Apply both vouch deductions and report boosts, and add signal messages.
+ * Returns { adjustedScore, signals } where signals is an array of new signal objects to append.
+ */
+const applyLocalAdjustments = (identifier, rawScore, signals) => {
+    const vouchCount = getVouchCount(identifier)
+    const reportCount = getLocalReportCount(identifier)
+    let score = rawScore
+
+    // Reports increase score
+    if (reportCount > 0) {
+        score += reportCount * REPORT_BOOST_PER_COUNT
+        signals.push({
+            level: 'danger',
+            text: `Reported ${reportCount} time${reportCount > 1 ? 's' : ''} by the community`
+        })
+    }
+
+    // Vouches decrease score
+    if (vouchCount > 0) {
+        score -= vouchCount * VOUCH_DEDUCTION_PER_CLICK
+        signals.push({
+            level: 'safe',
+            text: `Community vouch: score reduced by ${vouchCount * VOUCH_DEDUCTION_PER_CLICK} points`
+        })
+    }
+
+    return Math.max(0, Math.min(100, score))
+}
+
 export const isItemReported = (item) => {
     const normalised = item.toLowerCase().trim()
     return getReportedItems().find((r) => r.item === normalised) || null
@@ -318,12 +395,13 @@ export const analyseUPIId = (upiId) => {
         riskScore += 15
     }
 
+    const finalScore = applyLocalAdjustments(upiLower, Math.min(Math.max(riskScore, 0), 100), signals)
     return {
         upiId,
         username,
         handle,
         bankName: VERIFIED_HANDLES[handle] || 'Unknown',
-        riskScore: Math.min(Math.max(riskScore, 0), 100),
+        riskScore: finalScore,
         signals,
     }
 }
@@ -463,11 +541,13 @@ export const analyseQRContent = (rawText) => {
         })
     }
 
+    const qrIdentifier = pa || rawText
+    const finalScore = applyLocalAdjustments(qrIdentifier, Math.min(Math.max(riskScore, 0), 100), signals)
     return {
         pa,
         pn,
         am,
-        riskScore: Math.min(Math.max(riskScore, 0), 100),
+        riskScore: finalScore,
         signals,
         rawText,
     }
@@ -692,10 +772,11 @@ export const analyseLink = (url) => {
         signals.push({ level: 'info', text: 'No specific threats detected, but always verify links before clicking' })
     }
 
+    const finalScore = applyLocalAdjustments(url, Math.min(Math.max(riskScore, 0), 100), signals)
     return {
         url,
         domain,
-        riskScore: Math.min(Math.max(riskScore, 0), 100),
+        riskScore: finalScore,
         signals,
         isHTTPS: parsedURL.protocol === 'https:',
     }
@@ -704,52 +785,28 @@ export const analyseLink = (url) => {
 /* ═══════════════════════════════════════════════════════════════
    NEW RISK UI CONFIG (TIERED SCALE)
    ═══════════════════════════════════════════════════════════════ */
+const BINARY_THRESHOLD = 50
+
 export const getRiskUiConfig = (score) => {
-    if (score <= 25) {
+    if (score >= BINARY_THRESHOLD) {
         return {
-            level: 'MINIMAL RISK',
-            color: '#4CAF50',
-            glowColor: 'rgba(76,175,80,0.06)',
-            borderColor: 'rgba(76,175,80,0.3)',
-            icon: 'ℹ️',
-            message: 'Minimal fraud indicators detected. Lower risk, but always verify.'
-        }
-    } else if (score <= 40) {
-        return {
-            level: 'LOW RISK',
-            color: '#2196F3',
-            glowColor: 'rgba(33,150,243,0.06)',
-            borderColor: 'rgba(33,150,243,0.3)',
-            icon: 'ℹ️',
-            message: 'Few warning signs, stay vigilant. Verify receiver details before paying.'
-        }
-    } else if (score <= 60) {
-        return {
-            level: 'MEDIUM RISK',
-            color: '#FF9800',
-            glowColor: 'rgba(255,152,0,0.06)',
-            borderColor: 'rgba(255,152,0,0.3)',
-            icon: '⚠️',
-            message: 'Appears legitimate, but confirm details. Proceed with caution.'
-        }
-    } else if (score <= 80) {
-        return {
-            level: 'HIGH RISK',
-            color: '#FF5722',
-            glowColor: 'rgba(255,87,34,0.08)',
-            borderColor: 'rgba(255,87,34,0.4)',
+            level: 'FRAUD DETECTED',
+            color: '#FF3B5C',
+            glowColor: 'rgba(255,59,92,0.08)',
+            borderColor: 'rgba(255,59,92,0.4)',
             icon: '🚨',
-            message: 'STRONG FRAUD INDICATORS DETECTED! We strongly recommend NOT proceeding.'
+            message: 'Fraud indicators detected. We recommend NOT proceeding with this transaction.',
+            isFraud: true,
         }
-    } else {
-        return {
-            level: 'CRITICAL RISK',
-            color: '#D32F2F',
-            glowColor: 'rgba(211,47,47,0.1)',
-            borderColor: 'rgba(211,47,47,0.5)',
-            icon: '🛑',
-            message: 'CONFIRMED FRAUD DETECTED! Do NOT proceed. This is a confirmed scam.'
-        }
+    }
+    return {
+        level: 'NOT FRAUD',
+        color: '#00E5A0',
+        glowColor: 'rgba(0,229,160,0.06)',
+        borderColor: 'rgba(0,229,160,0.3)',
+        icon: '✅',
+        message: 'No fraud indicators detected. Always verify details before proceeding.',
+        isFraud: false,
     }
 }
 
@@ -783,9 +840,9 @@ export const generateTextReport = (results) => {
     ]
 
     results.forEach((r, i) => {
+        const classification = r.riskScore >= 50 ? 'FRAUD' : 'NOT FRAUD'
         lines.push(`\nItem ${i + 1}: ${r.item} (${r.type})`)
-        lines.push(`Status: ${r.riskScore < 30 ? 'SAFE' : r.riskScore < 60 ? 'CAUTION' : 'DANGEROUS'}`)
-        lines.push(`Risk Score: ${r.riskScore}/100`)
+        lines.push(`Classification: ${classification}`)
         lines.push('Signals:')
             ; (r.signals || []).forEach((s) => {
                 const icon = s.level === 'danger' ? '✗' : s.level === 'warning' ? '⚠' : s.level === 'safe' ? '✓' : 'ℹ'

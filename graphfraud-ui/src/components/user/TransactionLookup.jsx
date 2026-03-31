@@ -102,8 +102,8 @@ export default function TransactionLookup({ onReport }) {
                             <div key={label} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 16 }}>
                                 <p style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>{label}</p>
                                 <p className="mono" style={{ fontSize: 14, marginBottom: 4 }}>{check.upiId}</p>
-                                <p style={{ color: check.riskScore < 30 ? '#00E5A0' : check.riskScore < 60 ? '#FFB020' : '#FF3B5C', fontSize: 13 }}>
-                                    {check.riskScore < 30 ? '✅ No issues found' : `🔴 High risk (${check.riskScore}/100)`}
+                                <p style={{ color: check.riskScore >= 50 ? '#FF3B5C' : '#00E5A0', fontSize: 13, fontWeight: 600 }}>
+                                    {check.riskScore >= 50 ? '🚨 FRAUD' : '✅ NOT FRAUD'}
                                 </p>
                             </div>
                         ))}

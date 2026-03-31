@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X, ExternalLink, CheckCircle, Phone, ArrowLeft, AlertTriangle } from 'lucide-react'
-import { addReportedItem } from '../../utils/fraudAnalysis'
+import { addReportedItem, clearVouchedItem } from '../../utils/fraudAnalysis'
 import { API_BASE_URL } from '../../config'
 
 const REPORT_REASONS = [
@@ -79,7 +79,10 @@ export default function ReportModal({ item, onClose }) {
         localStorage.setItem('fraud_reports', JSON.stringify(existing))
 
         // Add to blacklist so re-scanning immediately flags it
-        if (item?.item) addReportedItem(item.item, item.type || 'Unknown')
+        if (item?.item) {
+            addReportedItem(item.item, item.type || 'Unknown')
+            clearVouchedItem(item.item) // Undo any previous 'Mark as Safe' vouches
+        }
 
         setRefCode(code)
         setScreen('confirmation')
@@ -172,7 +175,7 @@ export default function ReportModal({ item, onClose }) {
                             <div style={{ background: 'rgba(255,59,92,0.06)', borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13 }}>
                                 <p style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Reporting</p>
                                 <p className="mono" style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, wordBreak: 'break-all' }}>{item.item}</p>
-                                <p style={{ color: 'var(--text-secondary)', marginTop: 4 }}>Type: {item.type} — Current Risk: {item.risk}/100</p>
+                                <p style={{ color: 'var(--text-secondary)', marginTop: 4 }}>Type: {item.type} — Classification: <span style={{ color: (item.risk || 0) >= 50 ? '#FF3B5C' : '#00E5A0', fontWeight: 600 }}>{(item.risk || 0) >= 50 ? 'FRAUD' : 'NOT FRAUD'}</span></p>
                             </div>
                         )}
 

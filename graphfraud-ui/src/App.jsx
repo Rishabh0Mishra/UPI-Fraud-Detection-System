@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from './components/common/ToastNotification'
+import { LiveFeedProvider } from './context/LiveFeedContext'
 import Layout from './components/layout/Layout'
 import Dashboard from './pages/Dashboard'
 import LiveFeed from './pages/LiveFeed'
@@ -21,6 +22,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
+        <LiveFeedProvider>
         <BrowserRouter>
           <Layout>
             <Routes>
@@ -36,6 +38,7 @@ export default function App() {
             </Routes>
           </Layout>
         </BrowserRouter>
+        </LiveFeedProvider>
       </ToastProvider>
     </QueryClientProvider>
   )

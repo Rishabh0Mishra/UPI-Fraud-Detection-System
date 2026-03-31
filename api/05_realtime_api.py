@@ -873,6 +873,25 @@ async def submit_report(req: ReportRequest):
     )
     return res
 
+# ── POST /vouch (Mark as Safe) ───────────────────────────────────
+
+class VouchRequest(BaseModel):
+    identifier: str
+    vouch_type: str = 'UPI_ID'
+    user_id: str = 'anonymous'
+
+@app.post("/vouch")
+async def vouch_safe(req: VouchRequest):
+    """Mark an identifier as safe — reduces its fraud report count."""
+    from fraud_enhancements import submit_vouch
+    if not req.identifier:
+        raise HTTPException(status_code=400, detail="No identifier provided")
+    return submit_vouch(
+        identifier=req.identifier,
+        vouch_type=req.vouch_type,
+        user_id=req.user_id,
+    )
+
 
 # ── POST /validate-upi ───────────────────────────────────────────
 

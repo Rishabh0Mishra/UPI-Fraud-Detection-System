@@ -192,3 +192,20 @@ export const recordScan = async (upiId, userId = 'anonymous', score = 0, action 
         () => ({ status: 'recorded', upi_id: upiId, scan_id: Date.now() })
     )
 }
+
+// ── Vouch (Mark as Safe) ──
+
+export const vouchSafe = async (identifier, vouchType = 'UPI_ID') => {
+    return tryOrFallback(
+        async () => {
+            const { data } = await client.post('/vouch', {
+                identifier,
+                vouch_type: vouchType,
+                user_id: 'anonymous',
+            })
+            return data
+        },
+        () => ({ status: 'vouched', identifier, message: 'Marked as safe (mock)' })
+    )
+}
+

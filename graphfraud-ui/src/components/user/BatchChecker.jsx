@@ -38,7 +38,7 @@ export default function BatchChecker({ onReport }) {
             } else {
                 r.riskScore = 0; r.signals = [{ level: 'warning', text: 'Unrecognised format — could not check this item' }]
             }
-            r.status = r.status || (r.riskScore < 30 ? 'Safe' : r.riskScore < 60 ? 'Warning' : 'Dangerous')
+            r.status = r.status || (r.riskScore >= 50 ? 'FRAUD' : 'NOT FRAUD')
             out.push(r)
             setResults([...out]); setProgress(((i + 1) / lines.length) * 100)
         }
@@ -55,9 +55,8 @@ export default function BatchChecker({ onReport }) {
         URL.revokeObjectURL(url)
     }
 
-    const safeCount = results.filter(r => r.riskScore < 30).length
-    const warnCount = results.filter(r => r.riskScore >= 30 && r.riskScore < 60).length
-    const dangerCount = results.filter(r => r.riskScore >= 60).length
+    const safeCount = results.filter(r => r.riskScore < 50).length
+    const fraudCount = results.filter(r => r.riskScore >= 50).length
     const lineCount = text.trim().split('\n').filter(l => l.trim()).length
 
     return (
@@ -79,23 +78,18 @@ export default function BatchChecker({ onReport }) {
                         </div>
                     )}
                     <div style={{ borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden', marginBottom: 16 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 120px', padding: '10px 14px', background: 'var(--bg-elevated)', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
-                            <span>Item</span><span>Type</span><span>Risk</span><span>Status</span>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 140px', padding: '10px 14px', background: 'var(--bg-elevated)', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
+                            <span>Item</span><span>Type</span><span>Classification</span>
                         </div>
                         {results.map((r, i) => (
                             <div key={i}>
-                                <div onClick={() => toggleRow(i)} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 120px', padding: '10px 14px', borderTop: '1px solid var(--border)', cursor: 'pointer', alignItems: 'center', fontSize: 13, background: expanded[i] ? 'rgba(0,212,255,0.03)' : 'transparent', transition: 'background 0.15s' }}>
+                                <div onClick={() => toggleRow(i)} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 140px', padding: '10px 14px', borderTop: '1px solid var(--border)', cursor: 'pointer', alignItems: 'center', fontSize: 13, background: expanded[i] ? 'rgba(0,212,255,0.03)' : 'transparent', transition: 'background 0.15s' }}>
                                     <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                                         {expanded[i] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}{r.item}
                                     </span>
                                     <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{r.type}</span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                        <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                                            <div style={{ height: '100%', width: `${r.riskScore}%`, background: r.riskScore < 30 ? '#00E5A0' : r.riskScore < 60 ? '#FFB020' : '#FF3B5C', borderRadius: 3 }} />
-                                        </div>
-                                    </div>
-                                    <span style={{ color: r.riskScore < 30 ? '#00E5A0' : r.riskScore < 60 ? '#FFB020' : '#FF3B5C', fontSize: 12 }}>
-                                        {r.riskScore < 30 ? '✅' : r.riskScore < 60 ? '🟡' : '🔴'} {r.status} ({r.riskScore})
+                                    <span style={{ color: r.riskScore >= 50 ? '#FF3B5C' : '#00E5A0', fontSize: 12, fontWeight: 600 }}>
+                                        {r.riskScore >= 50 ? '🚨 FRAUD' : '✅ NOT FRAUD'}
                                     </span>
                                 </div>
                                 {expanded[i] && <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,0.15)' }}><SignalList signals={r.signals} /></div>}
@@ -105,11 +99,11 @@ export default function BatchChecker({ onReport }) {
                     {!processing && (
                         <>
                             <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
-                                Summary: <span style={{ color: '#00E5A0' }}>{safeCount} Safe ✅</span> &nbsp; <span style={{ color: '#FFB020' }}>{warnCount} Caution 🟡</span> &nbsp; <span style={{ color: '#FF3B5C' }}>{dangerCount} Dangerous 🔴</span>
+                                Summary: <span style={{ color: '#00E5A0' }}>{safeCount} Not Fraud ✅</span> &nbsp; <span style={{ color: '#FF3B5C' }}>{fraudCount} Fraud 🚨</span>
                             </p>
                             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                                 <button onClick={downloadReport} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 160 }}><Download size={14} /> Download Full Report</button>
-                                {dangerCount > 0 && <button onClick={() => results.filter(r => r.riskScore >= 60).forEach(r => onReport?.({ item: r.item, type: r.type, risk: r.riskScore }))} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, color: 'var(--accent-red)', minWidth: 160 }}>🚨 Report All Dangerous</button>}
+                                {fraudCount > 0 && <button onClick={() => results.filter(r => r.riskScore >= 50).forEach(r => onReport?.({ item: r.item, type: r.type, risk: r.riskScore }))} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, color: 'var(--accent-red)', minWidth: 160 }}>🚨 Report All Fraud</button>}
                                 <button onClick={() => { setResults([]); setText('') }} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120 }}>Check More</button>
                             </div>
                         </>

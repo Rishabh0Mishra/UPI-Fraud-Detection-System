@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Camera, Upload, X, StopCircle } from 'lucide-react'
-import { analyseQRContent, getRiskUiConfig } from '../../utils/fraudAnalysis'
+import { Camera, Upload, X, StopCircle, ShieldCheck } from 'lucide-react'
+import { analyseQRContent, getRiskUiConfig, removeReportedItem, addVouchedItem } from '../../utils/fraudAnalysis'
+import { vouchSafe } from '../../api/fraudApi'
 import RiskGauge from '../common/RiskGauge'
 import SignalList from '../common/SignalList'
 
@@ -11,6 +12,7 @@ export default function QRChecker({ onReport }) {
     const [manualText, setManualText] = useState('')
     const [cameraActive, setCameraActive] = useState(false)
     const [dragOver, setDragOver] = useState(false)
+    const [vouched, setVouched] = useState(false)
     const fileRef = useRef(null)
     const videoRef = useRef(null)
     const streamRef = useRef(null)
@@ -29,6 +31,7 @@ export default function QRChecker({ onReport }) {
         setError('')
         const res = analyseQRContent(text)
         setResult(res)
+        setVouched(false)
         stopCamera()
     }
 
@@ -92,7 +95,19 @@ export default function QRChecker({ onReport }) {
         animFrameRef.current = requestAnimationFrame(scanFrame)
     }
 
-    const reset = () => { setResult(null); setError(''); setPreview(null); setManualText(''); stopCamera() }
+    const reset = () => { setResult(null); setError(''); setPreview(null); setManualText(''); setVouched(false); stopCamera() }
+
+    const handleVouch = async () => {
+        const identifier = result.pa || result.rawText
+        if (!identifier) return
+        removeReportedItem(identifier)
+        addVouchedItem(identifier)
+        await vouchSafe(identifier, 'QR_CODE')
+        // Re-run analysis so score updates immediately
+        const updated = analyseQRContent(result.rawText || `upi://pay?pa=${result.pa}&pn=${result.pn || ''}&am=${result.am || 0}`)
+        setResult(updated)
+        setVouched(true)
+    }
 
     if (result) {
         const rs = result.riskScore
@@ -100,7 +115,7 @@ export default function QRChecker({ onReport }) {
         const ui = getRiskUiConfig(rs)
 
         return (
-            <div className="fade-in" style={{ background: ui.glowColor, border: `1px solid ${ui.borderColor}`, borderRadius: 20, padding: 32, ...(rs > 60 ? { animation: 'blockFlash 2s ease-in-out infinite' } : {}) }}>
+            <div className="fade-in" style={{ background: ui.glowColor, border: `1px solid ${ui.borderColor}`, borderRadius: 20, padding: 32, ...(ui.isFraud ? { animation: 'blockFlash 2s ease-in-out infinite' } : {}) }}>
                 <h3 style={{ color: ui.color, fontSize: 20, fontWeight: 700, marginBottom: 6 }}>
                     {isPreviouslyReported ? '🚫 KNOWN FRAUD' : `${ui.icon} ${ui.level}`}
                 </h3>
@@ -118,7 +133,7 @@ export default function QRChecker({ onReport }) {
                     </div>
                 )}
                 <SignalList signals={result.signals} />
-                {rs <= 40 && (
+                {!ui.isFraud && (
                     <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 16, marginTop: 16 }}>
                         <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>✓ VERIFICATION CHECKLIST:</p>
                         <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Before proceeding, confirm:</p>
@@ -134,7 +149,7 @@ export default function QRChecker({ onReport }) {
                         </p>
                     </div>
                 )}
-                {rs > 60 && (
+                {ui.isFraud && (
                     <div style={{ background: 'rgba(255,59,92,0.06)', border: '1px solid rgba(255,59,92,0.15)', borderRadius: 14, padding: 16, marginTop: 16 }}>
                         <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>What to do next:</p>
                         <ol style={{ color: 'var(--text-secondary)', fontSize: 14, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -145,10 +160,19 @@ export default function QRChecker({ onReport }) {
                     </div>
                 )}
                 <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
-                    <button onClick={() => onReport?.({ item: result.pa || result.rawText, type: 'QR Code', risk: rs })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>
-                        {rs > 60 ? '🚨 Report to confirm' : rs > 30 ? '⚠️ Report as Suspicious' : 'ℹ️ Report if suspicious'}
+                    <button onClick={() => onReport?.({ item: result.pa || result.rawText, type: 'QR Code', risk: rs })} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120 }}>
+                        {ui.isFraud ? '🚨 Report to confirm' : '⚠️ Report as Suspicious'}
                     </button>
-                    <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 140 }}>Check Another</button>
+                    {vouched ? (
+                        <button disabled className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, background: 'rgba(0,229,160,0.1)', color: '#00E5A0', border: '1px solid rgba(0,229,160,0.3)' }}>
+                            ✅ Marked as Safe
+                        </button>
+                    ) : (
+                        <button onClick={handleVouch} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, color: '#00E5A0' }}>
+                            <ShieldCheck size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Mark as Safe
+                        </button>
+                    )}
+                    <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120 }}>Check Another</button>
                 </div>
             </div>
         )
