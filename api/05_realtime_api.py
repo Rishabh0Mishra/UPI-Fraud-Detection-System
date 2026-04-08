@@ -1207,6 +1207,242 @@ async def record_scan_endpoint(req: ScanRequest):
         logger.error(f"Scan record error: {e}")
         return {"error": str(e)}
 
+
+# ────────────────────────────────────────────────────────────────────
+# SCREENSHOT VERIFICATION (POC)
+# ────────────────────────────────────────────────────────────────────
+
+from fastapi import File, UploadFile
+
+@app.post("/api/verify-screenshot")
+async def verify_screenshot_endpoint(file: UploadFile = File(...)):
+    """
+    Verify a UPI transaction screenshot for authenticity.
+
+    POC feature using LSB steganography extraction:
+    1. Checks file format (PNG only)
+    2. Detects which UPI app the screenshot is from (OCR + color)
+    3. Extracts hidden LSB signature from image pixels
+    4. Cross-checks signature against lookup table
+
+    Returns verdict: GENUINE, FRAUD, or REJECTED with reason.
+    """
+    import tempfile
+    import shutil
+
+    # Validate content type
+    if file.content_type and "image" not in file.content_type:
+        return {
+            "result": "REJECTED",
+            "reason_code": "INVALID_FORMAT",
+            "message": "Please upload an image file.",
+            "risk_score": 100,
+            "detected_app": None,
+            "display_name": "N/A",
+            "confidence": 0,
+            "confidence_label": "LOW",
+            "signature_status": "N/A",
+            "detection_method": "none",
+            "extracted_string": None,
+        }
+
+    # Save to temp file for processing
+    tmp_path = None
+    try:
+        suffix = f".{file.filename.rsplit('.', 1)[-1]}" if '.' in (file.filename or '') else ".png"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp_path = tmp.name
+            shutil.copyfileobj(file.file, tmp)
+
+        from screenshot_verification import verify_screenshot
+        result = verify_screenshot(tmp_path, original_filename=file.filename or "upload.png")
+
+        logger.info(
+            f"SCREENSHOT VERIFY  file={file.filename}  "
+            f"app={result.get('display_name')}  "
+            f"result={result.get('result')}  "
+            f"reason={result.get('reason_code')}"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Screenshot verification error: {e}")
+        return {
+            "result": "FRAUD",
+            "reason_code": "UNKNOWN_APP",
+            "message": f"Verification failed: {str(e)}",
+            "risk_score": 100,
+            "detected_app": None,
+            "display_name": "Unknown",
+            "confidence": 0,
+            "confidence_label": "LOW",
+            "signature_status": "ERROR",
+            "detection_method": "none",
+            "extracted_string": None,
+        }
+    finally:
+        # Clean up temp file
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+# ────────────────────────────────────────────────────────────────────
+# ADMIN SESSION MANAGEMENT + VERIFICATION TABLE CRUD
+# ────────────────────────────────────────────────────────────────────
+
+import secrets as _secrets
+from fastapi import Header
+
+# Hardcoded admin credentials (POC)
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"
+
+# In-memory session store: {token: True}
+_admin_sessions: dict = {}
+
+
+def _check_admin_session(x_admin_token: str = None) -> bool:
+    """Return True if the provided token is a valid admin session."""
+    if not x_admin_token:
+        return False
+    return x_admin_token in _admin_sessions
+
+
+# ── POST /api/admin/login ────────────────────────────────────────
+
+class AdminLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/admin/login")
+async def admin_login(req: AdminLoginRequest):
+    """Validate admin credentials and return a session token."""
+    if req.username == ADMIN_USERNAME and req.password == ADMIN_PASSWORD:
+        token = _secrets.token_hex(32)
+        _admin_sessions[token] = True
+        logger.info("Admin login successful")
+        return {"success": True, "session_token": token}
+    logger.warning(f"Failed admin login attempt for username: {req.username}")
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+# ── POST /api/admin/logout ───────────────────────────────────────
+
+@app.post("/api/admin/logout")
+async def admin_logout(x_admin_token: str = Header(default=None)):
+    """Invalidate the current admin session token."""
+    if x_admin_token and x_admin_token in _admin_sessions:
+        del _admin_sessions[x_admin_token]
+        logger.info("Admin logged out")
+    return {"success": True}
+
+
+# ── GET /api/admin/verify-session ───────────────────────────────
+
+@app.get("/api/admin/verify-session")
+async def admin_verify_session(x_admin_token: str = Header(default=None)):
+    """Check if the provided token is a valid admin session."""
+    if _check_admin_session(x_admin_token):
+        return {"valid": True}
+    raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+
+# ── GET /api/admin/verification-table ───────────────────────────
+
+@app.get("/api/admin/verification-table")
+async def admin_get_verification_table(x_admin_token: str = Header(default=None)):
+    """Return all rows from the screenshot_verification_table. Admin only."""
+    if not _check_admin_session(x_admin_token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        import sqlite3 as _sq3
+        from screenshot_verification import DB_PATH
+        conn = _sq3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT app_id, app_name, secret_string FROM screenshot_verification_table ORDER BY app_id")
+        rows = cursor.fetchall()
+        conn.close()
+        return {
+            "rows": [
+                {"app_id": r[0], "app_name": r[1], "secret_string": r[2]}
+                for r in rows
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Verification table fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── POST /api/admin/verification-table/add ──────────────────────
+
+class AddVerificationRowRequest(BaseModel):
+    app_name: str
+    secret_string: str
+
+
+@app.post("/api/admin/verification-table/add")
+async def admin_add_verification_row(
+    req: AddVerificationRowRequest,
+    x_admin_token: str = Header(default=None),
+):
+    """Add a new app -> secret_string row. Admin only."""
+    if not _check_admin_session(x_admin_token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not req.app_name.strip() or not req.secret_string.strip():
+        raise HTTPException(status_code=400, detail="app_name and secret_string are required")
+    try:
+        import sqlite3 as _sq3
+        from screenshot_verification import DB_PATH
+        conn = _sq3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO screenshot_verification_table (app_name, secret_string) VALUES (?, ?)",
+            (req.app_name.strip().lower(), req.secret_string.strip()),
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+        conn.close()
+        logger.info(f"Admin added verification row: {req.app_name}")
+        return {"success": True, "app_id": new_id, "app_name": req.app_name, "secret_string": req.secret_string}
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"App '{req.app_name}' already exists")
+        logger.error(f"Add verification row error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── DELETE /api/admin/verification-table/{app_id} ───────────────
+
+@app.delete("/api/admin/verification-table/{app_id}")
+async def admin_delete_verification_row(
+    app_id: int,
+    x_admin_token: str = Header(default=None),
+):
+    """Delete a row from the verification table by ID. Admin only."""
+    if not _check_admin_session(x_admin_token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        import sqlite3 as _sq3
+        from screenshot_verification import DB_PATH
+        conn = _sq3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM screenshot_verification_table WHERE app_id = ?", (app_id,))
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Row not found")
+        logger.info(f"Admin deleted verification row: app_id={app_id}")
+        return {"success": True, "deleted_id": app_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete verification row error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
@@ -1216,3 +1452,4 @@ if __name__ == "__main__":
         workers=1,
         reload=False,
     )
+

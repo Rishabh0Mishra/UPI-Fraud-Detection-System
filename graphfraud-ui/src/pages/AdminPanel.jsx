@@ -1,9 +1,82 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getHealth } from '../api/fraudApi'
+import { getHealth, getVerificationTable, addVerificationRow, deleteVerificationRow } from '../api/fraudApi'
 import { useToast } from '../components/common/ToastNotification'
-import { AlertTriangle, Save, RotateCcw, Lock, Unlock } from 'lucide-react'
+import { useAdminAuth } from '../contexts/AdminAuthContext'
+import AdminLogin from './AdminLogin'
+import { AlertTriangle, Save, RotateCcw, Lock, Unlock, Upload, Download, Plus, Trash2, Image, CheckCircle, XCircle, Eye, EyeOff } from 'lucide-react'
 
+// ─────────────────────────────────────────────────────────────────
+// StegEngine — EXACT port of steg.js from emmebeeding folder
+// ─────────────────────────────────────────────────────────────────
+const StegEngine = (() => {
+    const DELIMITER = '###END###'
+    const DEFAULT_SEED = 42
+    const CHANNELS = 3
+
+    function mulberry32(seed) {
+        return function () {
+            seed |= 0
+            seed = (seed + 0x6D2B79F5) | 0
+            let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+        }
+    }
+
+    function shuffledIndices(totalPixels, seed) {
+        const rng = mulberry32(seed)
+        const n = totalPixels * CHANNELS
+        const idx = []
+        for (let i = 0; i < totalPixels; i++) {
+            const b = i * 4
+            idx.push(b, b + 1, b + 2)
+        }
+        for (let i = n - 1; i > 0; i--) {
+            const j = Math.floor(rng() * (i + 1));
+            [idx[i], idx[j]] = [idx[j], idx[i]]
+        }
+        return idx
+    }
+
+    function strToBits(str) {
+        const bits = []
+        for (let i = 0; i < str.length; i++) {
+            const c = str.charCodeAt(i)
+            for (let b = 7; b >= 0; b--) bits.push((c >> b) & 1)
+        }
+        return bits
+    }
+
+    function getCapacity(totalPixels) {
+        return Math.floor((totalPixels * CHANNELS - DELIMITER.length * 8) / 8)
+    }
+
+    function encode(imageData, message, seed) {
+        seed = seed || DEFAULT_SEED
+        const data = imageData.data
+        const tp = imageData.width * imageData.height
+        const cap = getCapacity(tp)
+        if (!message) return { success: false, error: 'Message cannot be empty.' }
+        if (message.length > cap) return { success: false, error: 'Message exceeds capacity (' + cap + ' chars max).' }
+
+        const bits = strToBits(message + DELIMITER)
+        const idx = shuffledIndices(tp, seed)
+
+        for (let i = 0; i < bits.length; i++) {
+            const p = idx[i]
+            data[p] = (data[p] & 0xFE) | bits[i]
+        }
+
+        return { success: true, messageChars: message.length }
+    }
+
+    return { encode, getCapacity, DELIMITER, DEFAULT_SEED }
+})()
+
+// ─────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────
 const DEFAULT_THRESHOLDS = { block: 0.82, review: 0.45 }
 const DEFAULT_WEIGHTS = { lgbm: 75, graph: 25 }
 const DEFAULT_RULES = [
@@ -13,7 +86,533 @@ const DEFAULT_RULES = [
     { id: 'extreme_amount_ratio', label: 'Extreme amount ratio (>50×)', active: true, triggered: 1 },
 ]
 
+const APP_COLORS = {
+    gpay: '#34a853', phonepe: '#5f259f', paytm: '#00b9f1',
+    bhim: '#f37021', default: 'var(--accent-cyan)',
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Screenshot Verification Manager Component (Admin Only)
+// ─────────────────────────────────────────────────────────────────
+function ScreenshotVerificationManager({ token }) {
+    const { showToast } = useToast()
+    const canvasRef = useRef(null)
+    const fileInputRef = useRef(null)
+
+    // Embed state
+    const [selectedApp, setSelectedApp] = useState('')
+    const [uploadedFile, setUploadedFile] = useState(null)
+    const [uploadedPreview, setUploadedPreview] = useState(null)
+    const [embedStatus, setEmbedStatus] = useState(null) // { type: 'success'|'error', message }
+    const [isEmbedding, setIsEmbedding] = useState(false)
+
+    // Table state
+    const [tableRows, setTableRows] = useState([])
+    const [tableLoading, setTableLoading] = useState(true)
+    const [showSecrets, setShowSecrets] = useState({})
+
+    // Add new row form
+    const [showAddForm, setShowAddForm] = useState(false)
+    const [newAppName, setNewAppName] = useState('')
+    const [newSecret, setNewSecret] = useState('')
+    const [addLoading, setAddLoading] = useState(false)
+
+    // Load verification table
+    const loadTable = useCallback(async () => {
+        setTableLoading(true)
+        try {
+            const res = await getVerificationTable(token)
+            setTableRows(res.rows || [])
+        } catch (e) {
+            console.error('Failed to load verification table:', e)
+        } finally {
+            setTableLoading(false)
+        }
+    }, [token])
+
+    useEffect(() => { loadTable() }, [loadTable])
+
+    // Handle file selection
+    const handleFileSelect = (e) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+
+        // PNG only check
+        if (!file.type.includes('png')) {
+            setEmbedStatus({ type: 'error', message: '❌ Only PNG files are supported. JPEG and other formats destroy the LSB steganography data.' })
+            setUploadedFile(null)
+            setUploadedPreview(null)
+            return
+        }
+
+        setUploadedFile(file)
+        setEmbedStatus(null)
+        const reader = new FileReader()
+        reader.onload = (ev) => setUploadedPreview(ev.target.result)
+        reader.readAsDataURL(file)
+    }
+
+    // Download link state
+    const [downloadUrl, setDownloadUrl] = useState(null)
+    const [downloadName, setDownloadName] = useState('')
+
+    // Embed & Download
+    const handleEmbed = async () => {
+        if (!uploadedFile || !selectedApp) return
+
+        // Find the secret for this app
+        const row = tableRows.find(r => r.app_name === selectedApp)
+        if (!row) {
+            setEmbedStatus({ type: 'error', message: 'Selected app not found in verification table.' })
+            return
+        }
+
+        setIsEmbedding(true)
+        setEmbedStatus(null)
+        // Clean up old download URL
+        if (downloadUrl) { URL.revokeObjectURL(downloadUrl); setDownloadUrl(null) }
+
+        try {
+            // Load image into canvas
+            const img = new window.Image()
+            img.src = uploadedPreview
+
+            await new Promise((resolve, reject) => {
+                img.onload = resolve
+                img.onerror = reject
+            })
+
+            const canvas = canvasRef.current
+            const ctx = canvas.getContext('2d', { willReadFrequently: true })
+            canvas.width = img.naturalWidth
+            canvas.height = img.naturalHeight
+            ctx.drawImage(img, 0, 0)
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+
+            // Encode using StegEngine (exact same algorithm as steg.js)
+            const result = StegEngine.encode(imageData, row.secret_string, StegEngine.DEFAULT_SEED)
+
+            if (!result.success) {
+                setEmbedStatus({ type: 'error', message: result.error })
+                setIsEmbedding(false)
+                return
+            }
+
+            // Write back and generate blob
+            ctx.putImageData(imageData, 0, 0)
+            const blob = await new Promise(res => canvas.toBlob(res, 'image/png'))
+
+            // Create persistent download URL (user clicks manually)
+            const url = URL.createObjectURL(blob)
+            const fname = `verified_${selectedApp}_${Date.now()}.png`
+            setDownloadUrl(url)
+            setDownloadName(fname)
+
+            const displayName = row.app_name.charAt(0).toUpperCase() + row.app_name.slice(1)
+            setEmbedStatus({
+                type: 'success',
+                message: `✓ Signature embedded for ${displayName}. Click the download button below to save.`,
+            })
+            showToast(`Signature embedded for ${displayName}`, 'success')
+        } catch (err) {
+            setEmbedStatus({ type: 'error', message: `Embedding failed: ${err.message}` })
+        } finally {
+            setIsEmbedding(false)
+        }
+    }
+
+    // Add new app row
+    const handleAddRow = async () => {
+        if (!newAppName.trim() || !newSecret.trim()) return
+        setAddLoading(true)
+        try {
+            await addVerificationRow(token, newAppName, newSecret)
+            showToast(`Added ${newAppName} to verification table`, 'success')
+            setNewAppName('')
+            setNewSecret('')
+            setShowAddForm(false)
+            await loadTable()
+        } catch (err) {
+            const msg = err.response?.data?.detail || err.message
+            showToast(msg, 'danger')
+        } finally {
+            setAddLoading(false)
+        }
+    }
+
+    // Delete a row
+    const handleDeleteRow = async (appId, appName) => {
+        if (!window.confirm(`Delete "${appName}" from the verification table?`)) return
+        try {
+            await deleteVerificationRow(token, appId)
+            showToast(`Removed ${appName}`, 'warning')
+            await loadTable()
+        } catch (err) {
+            showToast('Failed to delete row', 'danger')
+        }
+    }
+
+    // Mask secret string
+    const maskSecret = (s) => s.length <= 6 ? '••••••' : s.slice(0, 4) + '••••••••'
+
+    return (
+        <div className="card">
+            <div className="section-header">Screenshot Verification Manager</div>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+                Embed verification signatures into UPI screenshots. Only the admin can create verified screenshots.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                {/* ─── Left: Embed Signature ─── */}
+                <div style={{
+                    padding: 20, borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border)',
+                }}>
+                    <div style={{
+                        fontSize: 12, fontWeight: 600, color: 'var(--accent-cyan)',
+                        marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6,
+                        textTransform: 'uppercase', letterSpacing: '0.5px',
+                    }}>
+                        <Image size={14} /> Embed Signature
+                    </div>
+
+                    {/* App Selector */}
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{
+                            display: 'block', fontSize: 11, fontWeight: 600,
+                            color: 'var(--text-secondary)', marginBottom: 6,
+                        }}>
+                            Select UPI App
+                        </label>
+                        <select
+                            value={selectedApp}
+                            onChange={(e) => setSelectedApp(e.target.value)}
+                            style={{ cursor: 'pointer' }}
+                        >
+                            <option value="">— Select app —</option>
+                            {tableRows.map((row) => (
+                                <option key={row.app_id} value={row.app_name}>
+                                    {row.app_name.charAt(0).toUpperCase() + row.app_name.slice(1)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* File Upload */}
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{
+                            display: 'block', fontSize: 11, fontWeight: 600,
+                            color: 'var(--text-secondary)', marginBottom: 6,
+                        }}>
+                            Upload Screenshot (PNG only)
+                        </label>
+
+                        {!uploadedPreview ? (
+                            <div
+                                onClick={() => fileInputRef.current?.click()}
+                                style={{
+                                    padding: '24px 16px', borderRadius: 8,
+                                    border: '2px dashed var(--border-bright)',
+                                    display: 'flex', flexDirection: 'column',
+                                    alignItems: 'center', gap: 8, cursor: 'pointer',
+                                    transition: 'border-color 0.2s',
+                                    background: 'rgba(0,0,0,0.15)',
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--accent-cyan)'}
+                                onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-bright)'}
+                            >
+                                <Upload size={20} style={{ color: 'var(--text-muted)' }} />
+                                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                    Click to upload PNG screenshot
+                                </span>
+                            </div>
+                        ) : (
+                            <div style={{ position: 'relative' }}>
+                                <img
+                                    src={uploadedPreview}
+                                    alt="Preview"
+                                    style={{
+                                        width: '100%', maxHeight: 160, objectFit: 'contain',
+                                        borderRadius: 8, border: '1px solid var(--border)',
+                                        background: '#000',
+                                    }}
+                                />
+                                <button
+                                    onClick={() => {
+                                        setUploadedFile(null)
+                                        setUploadedPreview(null)
+                                        setEmbedStatus(null)
+                                        if (fileInputRef.current) fileInputRef.current.value = ''
+                                    }}
+                                    style={{
+                                        position: 'absolute', top: 6, right: 6,
+                                        background: 'rgba(255,59,92,0.8)', color: '#fff',
+                                        border: 'none', borderRadius: 6,
+                                        width: 24, height: 24, fontSize: 12,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        )}
+
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/png"
+                            onChange={handleFileSelect}
+                            style={{ display: 'none' }}
+                        />
+                    </div>
+
+                    {/* Embed & Download Button */}
+                    <button
+                        className="btn-primary text-xs"
+                        onClick={handleEmbed}
+                        disabled={!selectedApp || !uploadedFile || isEmbedding}
+                        style={{ width: '100%', padding: '10px 16px', gap: 6 }}
+                    >
+                        {isEmbedding ? (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{
+                                    width: 14, height: 14, border: '2px solid rgba(10,14,26,0.3)',
+                                    borderTopColor: '#0A0E1A', borderRadius: '50%',
+                                    animation: 'spin 0.6s linear infinite',
+                                }} />
+                                Embedding...
+                            </span>
+                        ) : (
+                            <><Download size={14} /> Embed &amp; Download</>
+                        )}
+                    </button>
+
+                    {/* Status message */}
+                    {embedStatus && (
+                        <div style={{
+                            marginTop: 12, padding: '10px 12px', borderRadius: 8,
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            background: embedStatus.type === 'success'
+                                ? 'rgba(0,229,160,0.08)'
+                                : 'rgba(255,59,92,0.08)',
+                            border: `1px solid ${embedStatus.type === 'success'
+                                ? 'rgba(0,229,160,0.2)'
+                                : 'rgba(255,59,92,0.2)'}`,
+                        }}>
+                            {embedStatus.type === 'success'
+                                ? <CheckCircle size={14} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
+                                : <XCircle size={14} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />}
+                            <span style={{
+                                fontSize: 12,
+                                color: embedStatus.type === 'success' ? 'var(--accent-green)' : 'var(--accent-red)',
+                            }}>
+                                {embedStatus.message}
+                            </span>
+                        </div>
+                    )}
+
+                    {/* Visible Download Button */}
+                    {downloadUrl && (
+                        <a
+                            href={downloadUrl}
+                            download={downloadName}
+                            style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                marginTop: 10, padding: '12px 16px', borderRadius: 8,
+                                background: 'linear-gradient(135deg, #00E5A0, #00B880)',
+                                color: '#0A0E1A', textDecoration: 'none',
+                                fontWeight: 700, fontSize: 13,
+                                transition: 'all 0.2s',
+                                boxShadow: '0 0 20px rgba(0,229,160,0.15)',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.1)'; e.currentTarget.style.transform = 'translateY(-1px)' }}
+                            onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; e.currentTarget.style.transform = 'none' }}
+                        >
+                            <Download size={16} />
+                            ⬇ Download Watermarked PNG
+                        </a>
+                    )}
+                    {downloadUrl && (
+                        <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+                            File: <span className="mono" style={{ color: 'var(--text-secondary)' }}>{downloadName}</span>
+                            <br/>Saves to your browser's default Downloads folder
+                        </div>
+                    )}
+                </div>
+
+                {/* ─── Right: Verification Table ─── */}
+                <div style={{
+                    padding: 20, borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border)',
+                }}>
+                    <div style={{
+                        fontSize: 12, fontWeight: 600, color: 'var(--accent-cyan)',
+                        marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        textTransform: 'uppercase', letterSpacing: '0.5px',
+                    }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Lock size={14} /> Verification Table
+                        </span>
+                        <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'none' }}>
+                            {tableRows.length} entries
+                        </span>
+                    </div>
+
+                    {tableLoading ? (
+                        <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: 12 }}>
+                            Loading...
+                        </div>
+                    ) : (
+                        <>
+                            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>
+                                        <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>App</th>
+                                        <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600 }}>Secret String</th>
+                                        <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 600, width: 40 }}></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {tableRows.map((row) => (
+                                        <tr key={row.app_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                            <td style={{ padding: '8px 8px' }}>
+                                                <span style={{
+                                                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                                                    fontWeight: 600, color: APP_COLORS[row.app_name] || APP_COLORS.default,
+                                                }}>
+                                                    <div style={{
+                                                        width: 8, height: 8, borderRadius: '50%',
+                                                        background: APP_COLORS[row.app_name] || APP_COLORS.default,
+                                                    }} />
+                                                    {row.app_name.charAt(0).toUpperCase() + row.app_name.slice(1)}
+                                                </span>
+                                            </td>
+                                            <td style={{ padding: '8px 8px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <code className="mono" style={{
+                                                        fontSize: 11, color: 'var(--text-secondary)',
+                                                        background: 'rgba(0,0,0,0.2)', padding: '2px 6px',
+                                                        borderRadius: 4,
+                                                    }}>
+                                                        {showSecrets[row.app_id]
+                                                            ? row.secret_string
+                                                            : maskSecret(row.secret_string)}
+                                                    </code>
+                                                    <button
+                                                        onClick={() => setShowSecrets(prev => ({
+                                                            ...prev,
+                                                            [row.app_id]: !prev[row.app_id],
+                                                        }))}
+                                                        style={{
+                                                            background: 'transparent', border: 'none',
+                                                            cursor: 'pointer', color: 'var(--text-muted)',
+                                                            padding: 2,
+                                                        }}
+                                                    >
+                                                        {showSecrets[row.app_id]
+                                                            ? <EyeOff size={12} />
+                                                            : <Eye size={12} />}
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td style={{ padding: '8px 8px', textAlign: 'right' }}>
+                                                <button
+                                                    onClick={() => handleDeleteRow(row.app_id, row.app_name)}
+                                                    style={{
+                                                        background: 'transparent', border: 'none',
+                                                        cursor: 'pointer', color: 'var(--accent-red)',
+                                                        padding: 4, borderRadius: 4,
+                                                        transition: 'background 0.2s',
+                                                    }}
+                                                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,59,92,0.1)'}
+                                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                                    title="Delete"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+
+                            {/* Add new row */}
+                            {!showAddForm ? (
+                                <button
+                                    onClick={() => setShowAddForm(true)}
+                                    className="btn-secondary text-xs"
+                                    style={{ marginTop: 12, width: '100%', justifyContent: 'center' }}
+                                >
+                                    <Plus size={14} /> Add New App
+                                </button>
+                            ) : (
+                                <div style={{
+                                    marginTop: 12, padding: 12, borderRadius: 8,
+                                    background: 'rgba(0,212,255,0.04)',
+                                    border: '1px solid rgba(0,212,255,0.15)',
+                                }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                                        <input
+                                            value={newAppName}
+                                            onChange={(e) => setNewAppName(e.target.value)}
+                                            placeholder="App name"
+                                            style={{ fontSize: 12, padding: '8px 10px' }}
+                                        />
+                                        <input
+                                            value={newSecret}
+                                            onChange={(e) => setNewSecret(e.target.value)}
+                                            placeholder="Secret string"
+                                            className="mono"
+                                            style={{ fontSize: 11, padding: '8px 10px' }}
+                                        />
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <button
+                                            onClick={handleAddRow}
+                                            disabled={!newAppName.trim() || !newSecret.trim() || addLoading}
+                                            className="btn-primary text-xs"
+                                            style={{ flex: 1, padding: '8px 12px' }}
+                                        >
+                                            {addLoading ? 'Adding...' : <><Plus size={12} /> Add</>}
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowAddForm(false)
+                                                setNewAppName('')
+                                                setNewSecret('')
+                                            }}
+                                            className="btn-secondary text-xs"
+                                            style={{ padding: '8px 12px' }}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* Hidden canvas for image processing */}
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+            {/* Spin keyframe */}
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Main AdminPanel Component (with Login Gate)
+// ─────────────────────────────────────────────────────────────────
 export default function AdminPanel() {
+    const { isLoggedIn, isLoading, token } = useAdminAuth()
+
     useQuery({ queryKey: ['health'], queryFn: getHealth })
     const { showToast } = useToast()
 
@@ -75,7 +674,29 @@ export default function AdminPanel() {
         })
     }
 
-    // Compute impact preview
+    // ── Loading state ──
+    if (isLoading) {
+        return (
+            <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                height: '60vh', color: 'var(--text-muted)',
+            }}>
+                <div style={{
+                    width: 24, height: 24, border: '2px solid var(--border)',
+                    borderTopColor: 'var(--accent-cyan)', borderRadius: '50%',
+                    animation: 'spin 0.6s linear infinite',
+                }} />
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+        )
+    }
+
+    // ── Login Gate ──
+    if (!isLoggedIn) {
+        return <AdminLogin />
+    }
+
+    // ── Compute impact preview ──
     const blockRate = Math.max(0, 0.73 + (thresholds.block - 0.82) * -5).toFixed(2)
     const reviewRate = Math.max(0, 2.74 + (thresholds.review - 0.45) * -8).toFixed(2)
     const allowRate = (100 - parseFloat(blockRate) - parseFloat(reviewRate)).toFixed(1)
@@ -237,6 +858,9 @@ export default function AdminPanel() {
                     </table>
                 )}
             </div>
+
+            {/* Section 5: Screenshot Verification Manager (NEW) */}
+            <ScreenshotVerificationManager token={token} />
 
             {/* Confirm Modal */}
             {confirmModal && (

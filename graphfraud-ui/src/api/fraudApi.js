@@ -209,3 +209,102 @@ export const vouchSafe = async (identifier, vouchType = 'UPI_ID') => {
     )
 }
 
+// ── Screenshot Verification ──
+
+export const verifyScreenshot = async (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    return tryOrFallback(
+        async () => {
+            const { data } = await client.post('/api/verify-screenshot', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                timeout: 30000, // allow more time for OCR processing
+            })
+            return data
+        },
+        () => {
+            // Mock response for offline mode
+            const isPng = file.name?.toLowerCase().endsWith('.png')
+            if (!isPng) {
+                return {
+                    result: 'REJECTED',
+                    reason_code: 'INVALID_FORMAT',
+                    message: 'Only PNG screenshots are supported. JPEG and other formats destroy the verification signature.',
+                    risk_score: 100,
+                    detected_app: null,
+                    display_name: 'N/A',
+                    confidence: 0,
+                    confidence_label: 'LOW',
+                    signature_status: 'N/A',
+                    detection_method: 'none',
+                    extracted_string: null,
+                }
+            }
+            // Random mock result for demo
+            const isFraud = Math.random() > 0.5
+            return {
+                result: isFraud ? 'FRAUD' : 'GENUINE',
+                reason_code: isFraud ? 'NO_STRING' : 'GENUINE',
+                message: isFraud
+                    ? 'No verification signature found. This is likely a fake or unverified screenshot.'
+                    : 'This screenshot has a valid verification signature. The transaction appears authentic.',
+                risk_score: isFraud ? 100 : 0,
+                detected_app: 'gpay',
+                display_name: 'Google Pay',
+                confidence: 0.85,
+                confidence_label: 'HIGH',
+                signature_status: isFraud ? 'NOT FOUND' : 'VALID ✓',
+                detection_method: 'ocr',
+                extracted_string: isFraud ? null : '[HIDDEN]',
+            }
+        }
+    )
+}
+
+// ── Admin Session Management ──
+
+export const adminLogin = async (username, password) => {
+    const { data } = await client.post('/api/admin/login', { username, password })
+    return data
+}
+
+export const adminLogout = async (token) => {
+    const { data } = await client.post('/api/admin/logout', null, {
+        headers: { 'x-admin-token': token },
+    })
+    return data
+}
+
+export const adminVerifySession = async (token) => {
+    const { data } = await client.get('/api/admin/verify-session', {
+        headers: { 'x-admin-token': token },
+    })
+    return data
+}
+
+// ── Admin Verification Table CRUD ──
+
+export const getVerificationTable = async (token) => {
+    const { data } = await client.get('/api/admin/verification-table', {
+        headers: { 'x-admin-token': token },
+    })
+    return data
+}
+
+export const addVerificationRow = async (token, app_name, secret_string) => {
+    const { data } = await client.post('/api/admin/verification-table/add',
+        { app_name, secret_string },
+        { headers: { 'x-admin-token': token } },
+    )
+    return data
+}
+
+export const deleteVerificationRow = async (token, appId) => {
+    const { data } = await client.delete(`/api/admin/verification-table/${appId}`, {
+        headers: { 'x-admin-token': token },
+    })
+    return data
+}
+
+
