@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Shield, Camera, Link2, UserCheck, Receipt, ListChecks, Search, FileText } from 'lucide-react'
+import { Shield, Camera, Link2, UserCheck, Receipt, ListChecks, Search, FileText, ImageIcon } from 'lucide-react'
 import { detectInputType } from '../utils/checkTypeDetector'
 import QRChecker from '../components/user/QRChecker'
 import LinkChecker from '../components/user/LinkChecker'
+import ScreenshotChecker from '../components/user/ScreenshotChecker'
 import UPIChecker from '../components/user/UPIChecker'
 import TransactionLookup from '../components/user/TransactionLookup'
 import BatchChecker from '../components/user/BatchChecker'
@@ -11,6 +12,7 @@ import ReportModal from '../components/user/ReportModal'
 const TABS = [
     { id: 'qr', label: 'QR Code', icon: Camera },
     { id: 'link', label: 'Link Check', icon: Link2 },
+    { id: 'screenshot', label: 'Screenshot', icon: ImageIcon },
     { id: 'upi', label: 'UPI ID', icon: UserCheck },
     { id: 'txn', label: 'Txn Lookup', icon: Receipt },
     { id: 'batch', label: 'Batch Upload', icon: ListChecks },
@@ -100,6 +102,7 @@ export default function UserPortal() {
                 <div className="card" style={{ borderRadius: 20, padding: '28px 24px' }}>
                     {activeTab === 'qr' && <QRChecker onReport={openReport} />}
                     {activeTab === 'link' && <LinkChecker onReport={openReport} />}
+                    {activeTab === 'screenshot' && <ScreenshotChecker onReport={openReport} />}
                     {activeTab === 'upi' && <UPIChecker onReport={openReport} />}
                     {activeTab === 'txn' && <TransactionLookup onReport={openReport} />}
                     {activeTab === 'batch' && <BatchChecker onReport={openReport} />}

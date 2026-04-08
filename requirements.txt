@@ -13,3 +13,7 @@ shap
 matplotlib
 redis
 joblib
+Pillow
+pytesseract
+opencv-python
+python-multipart
