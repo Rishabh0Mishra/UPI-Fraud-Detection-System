@@ -527,13 +527,22 @@ export const analyseQRContent = (rawText) => {
     }
 
     // CHECK 7: UPI handle bank legitimacy
+    // An unrecognised handle = confirmed fraud. Score is LOCKED at 100.
+    // applyLocalAdjustments is bypassed — community vouches cannot override this.
     const handle = pa.split('@')[1] || ''
     if (handle && !VERIFIED_HANDLES[handle.toLowerCase()]) {
         signals.push({
-            level: 'warning',
-            text: `Unknown UPI bank handle "@${handle}" — verify this is a legitimate payment receiver`,
+            level: 'danger',
+            text: `🚨 UPI handle "@${handle}" is NOT recognised by any known bank.\n\n✓ Valid handles: @paytm, @ybl, @oksbi, @okaxis, @okicici\n✗ Detected: @${handle}\n\nThis QR code is fraudulent — do NOT pay.`,
         })
-        riskScore += 20
+        // Return immediately — score locked at 100, no vouch adjustment possible
+        return {
+            pa, pn, am,
+            riskScore: 100,
+            signals,
+            rawText,
+            _unknownHandle: true,
+        }
     } else if (handle && VERIFIED_HANDLES[handle.toLowerCase()]) {
         signals.push({
             level: 'safe',

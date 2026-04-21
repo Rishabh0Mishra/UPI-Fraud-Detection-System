@@ -4,10 +4,11 @@ screenshot_verification.py
 UPI Transaction Screenshot Verification Module (Proof-of-Concept)
 
 This module provides:
-  1. Database table for app → secret string lookup
-  2. UPI app detection via OCR keywords + dominant color analysis
-  3. LSB steganography extraction from PNG red channel
-  4. Verification of extracted string against lookup table
+  1. UPI screenshot classification (is this even a UPI screenshot?)
+  2. Database table for app → secret string lookup
+  3. UPI app detection via OCR keywords + dominant color analysis
+  4. LSB steganography extraction from PNG pixels (Mulberry32 scatter)
+  5. Verification of extracted string against lookup table
 
 NOTE: This is a POC/demo feature. In production, screenshot verification
 would be replaced by server-side payment gateway verification. The secret
@@ -19,6 +20,7 @@ System dep:   tesseract-ocr (brew install tesseract on macOS)
 """
 
 import os
+import re
 import logging
 import sqlite3
 import tempfile
@@ -28,6 +30,23 @@ import numpy as np
 from PIL import Image
 
 logger = logging.getLogger("upi_fraud_api")
+
+# ── Tesseract binary path (Homebrew on macOS puts it here) ───────────
+# pytesseract needs to know where the tesseract binary is if it's not in PATH
+try:
+    import pytesseract as _pyt
+    _TESSERACT_CANDIDATES = [
+        "/opt/homebrew/bin/tesseract",   # Apple Silicon Mac (Homebrew)
+        "/usr/local/bin/tesseract",      # Intel Mac (Homebrew)
+        "/usr/bin/tesseract",            # Linux
+    ]
+    for _candidate in _TESSERACT_CANDIDATES:
+        if Path(_candidate).exists():
+            _pyt.pytesseract.tesseract_cmd = _candidate
+            logger.info(f"  Tesseract OCR configured at: {_candidate}")
+            break
+except ImportError:
+    pass  # pytesseract not installed — OCR will be unavailable
 
 # ────────────────────────────────────────────────────────────────────
 # PATHS
@@ -126,6 +145,177 @@ def init_screenshot_db():
 
 # Initialise on module load
 init_screenshot_db()
+
+
+# ────────────────────────────────────────────────────────────────────
+# FUNCTION 0: UPI SCREENSHOT CLASSIFICATION
+# ────────────────────────────────────────────────────────────────────
+
+# UPI-specific text patterns to look for via OCR
+_UPI_TEXT_PATTERNS = [
+    # Transaction status phrases
+    r"(?i)payment\s+successful",
+    r"(?i)money\s+sent",
+    r"(?i)money\s+received",
+    r"(?i)transaction\s+successful",
+    r"(?i)transfer\s+successful",
+    r"(?i)paid\s+to",
+    r"(?i)received\s+from",
+    r"(?i)payment\s+completed",
+    r"(?i)transaction\s+complete",
+    r"(?i)sent\s+to",
+    # UPI-specific identifiers
+    r"(?i)upi\s*(ref|reference|txn|transaction|id)",
+    r"(?i)(txn|transaction)\s*(id|no|number|ref)",
+    r"(?i)utr\s*(no|number|:)",
+    # Rupee amounts (₹ symbol or Rs or INR)
+    r"₹\s*[\d,]+",
+    r"(?i)rs\.?\s*[\d,]+",
+    r"(?i)inr\s*[\d,]+",
+    # UPI app names (strong signal)
+    r"(?i)google\s*pay",
+    r"(?i)phonepe",
+    r"(?i)paytm",
+    r"(?i)\bbhim\b",
+    r"(?i)gpay",
+    # UPI ID patterns (user@bank)
+    r"[a-zA-Z0-9._-]+@[a-zA-Z]{2,}",
+    # Bank / payment keywords
+    r"(?i)credited\s+to",
+    r"(?i)debited\s+from",
+    r"(?i)bank\s+account",
+    r"(?i)a/c\s+ending",
+]
+
+# Phone-like aspect ratios (height/width) — generous bounds to cover cropped screenshots
+_MIN_ASPECT_RATIO = 0.9   # Allow slightly wider-than-tall (e.g. cropped screenshots)
+_MAX_ASPECT_RATIO = 3.5   # Allow very tall screenshots (some phones)
+
+
+def classify_upi_screenshot(image_path: str) -> dict:
+    """
+    Determine whether an image is actually a UPI payment screenshot.
+
+    Checks:
+    1. Aspect ratio — UPI screenshots are phone-sized (portrait, ~9:16 to 9:20)
+    2. UPI-specific text patterns — via OCR (transaction IDs, ₹ amounts, status, app names)
+    3. Combined confidence scoring
+
+    Returns: {
+        is_upi_screenshot: bool,
+        confidence: float (0-1),
+        signals: list[str],      # what was detected
+        ocr_available: bool,
+        aspect_ratio_ok: bool,
+    }
+    """
+    signals = []
+    score = 0.0
+
+    try:
+        img = Image.open(image_path)
+        w, h = img.size
+    except Exception as e:
+        logger.warning(f"Could not open image for classification: {e}")
+        return {
+            "is_upi_screenshot": False,
+            "confidence": 0,
+            "signals": ["image_open_failed"],
+            "ocr_available": False,
+            "aspect_ratio_ok": False,
+        }
+
+    # ── Check 1: Aspect ratio ────────────────────────────────────
+    aspect_ratio = h / w if w > 0 else 0
+    aspect_ok = _MIN_ASPECT_RATIO <= aspect_ratio <= _MAX_ASPECT_RATIO
+
+    if aspect_ok:
+        signals.append("portrait_aspect_ratio")
+        # Portrait alone is enough to pass — UPI screenshots are always phone-shaped.
+        # OCR patterns are a bonus on top of this.
+        score += 0.50
+    else:
+        # Landscape/square — still give a small score, OCR can rescue it
+        signals.append("non_portrait_aspect_ratio")
+        score += 0.05
+
+    # ── Check 2: Minimum resolution ─────────────────────────────
+    if w >= 100 and h >= 150:
+        signals.append("adequate_resolution")
+        score += 0.05
+    else:
+        signals.append("very_low_resolution")
+
+    # ── Check 3: OCR text pattern matching ───────────────────────
+    ocr_available = False
+    ocr_text = ""
+
+    try:
+        import pytesseract
+        ocr_text = pytesseract.image_to_string(img)
+        ocr_available = True
+    except ImportError:
+        logger.warning("pytesseract not available — skipping OCR classification")
+        signals.append("ocr_unavailable")
+    except Exception as e:
+        logger.warning(f"OCR failed during classification: {e}")
+        signals.append("ocr_error")
+
+    if ocr_available and ocr_text:
+        pattern_matches = 0
+        matched_patterns = []
+
+        for pattern in _UPI_TEXT_PATTERNS:
+            if re.search(pattern, ocr_text):
+                pattern_matches += 1
+                # Extract a human-readable label from the pattern
+                clean = pattern.replace("(?i)", "").replace(r"\s+", " ").replace(r"\s*", "")
+                clean = re.sub(r"[\\(){}|?+*\[\]]", "", clean)[:30]
+                matched_patterns.append(clean.strip())
+
+        if pattern_matches >= 4:
+            score += 0.60  # Very strong signal — multiple UPI indicators
+            signals.append(f"strong_upi_text ({pattern_matches} patterns)")
+        elif pattern_matches >= 2:
+            score += 0.40  # Good signal — some UPI indicators
+            signals.append(f"moderate_upi_text ({pattern_matches} patterns)")
+        elif pattern_matches == 1:
+            score += 0.15  # Weak signal — could be coincidence
+            signals.append(f"weak_upi_text ({pattern_matches} pattern)")
+        else:
+            signals.append("no_upi_text_found")
+
+        if matched_patterns:
+            signals.append(f"matched: {', '.join(matched_patterns[:5])}")
+
+        # Check for Rupee symbol specifically (very strong UPI indicator)
+        if re.search(r"₹", ocr_text):
+            score += 0.10
+            signals.append("rupee_symbol_found")
+
+    elif not ocr_available:
+        # OCR unavailable — portrait aspect ratio alone is sufficient to pass
+        signals.append("ocr_unavailable_aspect_sufficient")
+
+    # ── Final classification ─────────────────────────────────────
+    # Threshold is 0.25 — portrait alone (0.50+0.05) far exceeds this.
+    # Only truly non-portrait images with no OCR text will be rejected.
+    confidence = min(1.0, score)
+    is_upi = confidence >= 0.25
+
+    logger.info(
+        f"  UPI classification: is_upi={is_upi}, confidence={confidence:.2f}, "
+        f"signals={signals}"
+    )
+
+    return {
+        "is_upi_screenshot": is_upi,
+        "confidence": round(confidence, 2),
+        "signals": signals,
+        "ocr_available": ocr_available,
+        "aspect_ratio_ok": aspect_ok,
+    }
+
 
 # ────────────────────────────────────────────────────────────────────
 # FUNCTION 1: DETECT UPI APP
@@ -410,6 +600,7 @@ REASON_MESSAGES = {
     "STRING_MISMATCH": "Cross-app forgery detected! The embedded signature belongs to a different app than what the screenshot appears to be.",
     "UNKNOWN_APP": "Screenshot does not match any known UPI app.",
     "INVALID_FORMAT": "Only PNG screenshots are supported. JPEG and other formats destroy the verification signature.",
+    "NOT_UPI_SCREENSHOT": "This image does not appear to be a UPI payment screenshot. Please upload a screenshot from a UPI app like Google Pay, PhonePe, Paytm, or BHIM.",
 }
 
 
@@ -532,10 +723,11 @@ def verify_screenshot(image_path: str, original_filename: str = "") -> dict:
     Full screenshot verification pipeline (STRING-FIRST approach).
 
     1. Check file format (PNG only)
-    2. Extract LSB steganography string FIRST (this is the crypto proof)
-    3. Look up string in DB to identify which app it belongs to
-    4. Detect UPI app via OCR/color as secondary context
-    5. Return verdict
+    2. Classify whether the image is a UPI screenshot at all
+    3. Extract LSB steganography string FIRST (this is the crypto proof)
+    4. Look up string in DB to identify which app it belongs to
+    5. Detect UPI app via OCR/color as secondary context
+    6. Return verdict
 
     Returns complete verification result (never exposes secret strings).
     """
@@ -554,17 +746,43 @@ def verify_screenshot(image_path: str, original_filename: str = "") -> dict:
             "signature_status": "N/A",
             "detection_method": "none",
             "extracted_string": None,
+            "is_upi_screenshot": None,
+            "classification_signals": [],
         }
 
-    # Step 1: Extract LSB string FIRST (this is the primary check)
+    # Step 1: Classify whether this is even a UPI screenshot
+    classification = classify_upi_screenshot(image_path)
+    logger.info(
+        f"  UPI classification: is_upi={classification['is_upi_screenshot']}, "
+        f"confidence={classification['confidence']}"
+    )
+
+    if not classification["is_upi_screenshot"]:
+        return {
+            "result": "REJECTED",
+            "reason_code": "NOT_UPI_SCREENSHOT",
+            "message": REASON_MESSAGES["NOT_UPI_SCREENSHOT"],
+            "risk_score": 100,
+            "detected_app": None,
+            "display_name": "Not a UPI Screenshot",
+            "confidence": classification["confidence"],
+            "confidence_label": "LOW",
+            "signature_status": "N/A",
+            "detection_method": "classification",
+            "extracted_string": None,
+            "is_upi_screenshot": False,
+            "classification_signals": classification["signals"],
+        }
+
+    # Step 2: Extract LSB string FIRST (this is the primary check)
     extracted = extract_lsb_string(image_path, string_length=16)
     logger.info(f"  LSB extraction: {'found string' if extracted else 'no string found'}")
 
-    # Step 2: Detect UPI app (secondary context)
+    # Step 3: Detect UPI app (secondary context)
     app_info = detect_upi_app(image_path)
     logger.info(f"  App detection: {app_info['display_name']} ({app_info['method']}, conf={app_info['confidence']})")
 
-    # Step 3: Verify string against DB (string-first)
+    # Step 4: Verify string against DB (string-first)
     verification = verify_against_table(app_info["detected_app"], extracted)
 
     # Use matched_app from string lookup if available (more reliable than color detection)
@@ -601,5 +819,6 @@ def verify_screenshot(image_path: str, original_filename: str = "") -> dict:
         ),
         # Never expose actual strings
         "extracted_string": "[HIDDEN]" if extracted else None,
+        "is_upi_screenshot": True,
+        "classification_signals": classification["signals"],
     }
-

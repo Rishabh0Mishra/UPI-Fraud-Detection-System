@@ -1,8 +1,9 @@
 import { useState, useRef } from 'react'
-import { Upload, Shield, AlertTriangle, CheckCircle, XCircle, Loader, ImageIcon, FileWarning } from 'lucide-react'
+import { Upload, Shield, AlertTriangle, CheckCircle, XCircle, Loader, ImageIcon, FileWarning, ImageOff } from 'lucide-react'
 import { verifyScreenshot } from '../../api/fraudApi'
 
 const ANALYSIS_STEPS = [
+    { key: 'classify', label: 'Checking if UPI screenshot' },
     { key: 'detect', label: 'Detecting UPI App' },
     { key: 'extract', label: 'Extracting verification signature' },
     { key: 'match', label: 'Matching against database' },
@@ -44,13 +45,21 @@ export default function ScreenshotChecker({ onReport }) {
         })
 
         try {
-            await stepDelay(0, 0)
-            await stepDelay(1, 900)
+            await stepDelay(0, 0)        // Checking if UPI screenshot
+            await stepDelay(1, 800)      // Detecting UPI App
 
             const data = await verifyScreenshot(file)
 
-            await stepDelay(2, 800)
-            await new Promise(r => setTimeout(r, 600))
+            // If rejected at classification stage, skip remaining animation
+            if (data.reason_code === 'NOT_UPI_SCREENSHOT' || data.reason_code === 'INVALID_FORMAT') {
+                setResult(data)
+                setState('result')
+                return
+            }
+
+            await stepDelay(2, 700)      // Extracting signature
+            await stepDelay(3, 600)      // Matching against database
+            await new Promise(r => setTimeout(r, 400))
 
             setResult(data)
             setState('result')
@@ -141,70 +150,148 @@ export default function ScreenshotChecker({ onReport }) {
     if (state === 'result' && result) {
         const isGenuine = result.result === 'GENUINE'
         const isRejected = result.result === 'REJECTED'
+        const isNotUPI = result.reason_code === 'NOT_UPI_SCREENSHOT'
 
         const glowColor = isGenuine
             ? 'rgba(0,229,160,0.04)'
-            : 'rgba(255,59,92,0.04)'
+            : isNotUPI
+                ? 'rgba(255,176,32,0.04)'
+                : 'rgba(255,59,92,0.04)'
         const borderColor = isGenuine
             ? 'rgba(0,229,160,0.2)'
-            : 'rgba(255,59,92,0.2)'
-        const accentColor = isGenuine ? '#00E5A0' : '#FF3B5C'
+            : isNotUPI
+                ? 'rgba(255,176,32,0.2)'
+                : 'rgba(255,59,92,0.2)'
+        const accentColor = isGenuine
+            ? '#00E5A0'
+            : isNotUPI
+                ? '#FFB020'
+                : '#FF3B5C'
 
         return (
             <div className="fade-in" style={{
                 background: glowColor,
                 border: `1px solid ${borderColor}`,
                 borderRadius: 20, padding: 32,
-                ...(isGenuine ? {} : { animation: 'blockFlash 2s ease-in-out infinite' }),
+                ...(isGenuine || isNotUPI ? {} : { animation: 'blockFlash 2s ease-in-out infinite' }),
             }}>
                 {/* Verdict Header */}
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
                     <div style={{
                         width: 56, height: 56, borderRadius: '50%',
-                        background: isGenuine ? 'rgba(0,229,160,0.12)' : 'rgba(255,59,92,0.12)',
+                        background: isGenuine
+                            ? 'rgba(0,229,160,0.12)'
+                            : isNotUPI
+                                ? 'rgba(255,176,32,0.12)'
+                                : 'rgba(255,59,92,0.12)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         margin: '0 auto 12px',
                     }}>
                         {isGenuine
                             ? <CheckCircle size={28} style={{ color: '#00E5A0' }} />
-                            : <XCircle size={28} style={{ color: '#FF3B5C' }} />
+                            : isNotUPI
+                                ? <ImageOff size={28} style={{ color: '#FFB020' }} />
+                                : <XCircle size={28} style={{ color: '#FF3B5C' }} />
                         }
                     </div>
                     <h3 style={{ color: accentColor, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-                        {isGenuine ? '✅ GENUINE TRANSACTION' : isRejected ? '⚠️ FORMAT REJECTED' : '❌ FRAUD DETECTED'}
+                        {isGenuine
+                            ? '✅ GENUINE TRANSACTION'
+                            : isNotUPI
+                                ? '⚠️ NOT A UPI SCREENSHOT'
+                                : isRejected
+                                    ? '⚠️ FORMAT REJECTED'
+                                    : '❌ FRAUD DETECTED'
+                        }
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: 14, maxWidth: 400, margin: '0 auto' }}>
                         {result.message}
                     </p>
                 </div>
 
-                {/* Details Card */}
-                <div style={{
-                    background: 'rgba(255,255,255,0.03)', borderRadius: 14,
-                    padding: 16, marginBottom: 16,
-                }}>
-                    {[
-                        ['App Detected', result.display_name || 'Unknown'],
-                        ['Confidence', result.confidence_label || 'N/A'],
-                        ['Detection Method', result.detection_method === 'ocr' ? 'Text Recognition (OCR)' : result.detection_method === 'color' ? 'Color Analysis' : 'N/A'],
-                        ['Signature', result.signature_status || 'N/A'],
-                        ['Risk Score', `${result.risk_score}/100`],
-                    ].map(([k, v]) => (
-                        <div key={k} style={{
-                            display: 'flex', justifyContent: 'space-between',
-                            padding: '8px 0', fontSize: 14,
-                            borderBottom: '1px solid rgba(255,255,255,0.04)',
-                        }}>
-                            <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
-                            <span className="mono" style={{
-                                color: k === 'Signature'
-                                    ? (result.signature_status?.includes('VALID') ? '#00E5A0' : '#FF3B5C')
-                                    : 'var(--text-primary)',
-                                fontWeight: k === 'Signature' ? 600 : 400,
-                            }}>{v}</span>
+                {/* Details Card — only show for UPI screenshots (not for NOT_UPI rejection) */}
+                {!isNotUPI && (
+                    <div style={{
+                        background: 'rgba(255,255,255,0.03)', borderRadius: 14,
+                        padding: 16, marginBottom: 16,
+                    }}>
+                        {[
+                            ['App Detected', result.display_name || 'Unknown'],
+                            ['Confidence', result.confidence_label || 'N/A'],
+                            ['Detection Method', result.detection_method === 'ocr' ? 'Text Recognition (OCR)' : result.detection_method === 'color' ? 'Color Analysis' : result.detection_method === 'signature' ? 'Cryptographic Signature' : 'N/A'],
+                            ['Signature', result.signature_status || 'N/A'],
+                            ['Risk Score', `${result.risk_score}/100`],
+                        ].map(([k, v]) => (
+                            <div key={k} style={{
+                                display: 'flex', justifyContent: 'space-between',
+                                padding: '8px 0', fontSize: 14,
+                                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                            }}>
+                                <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
+                                <span className="mono" style={{
+                                    color: k === 'Signature'
+                                        ? (result.signature_status?.includes('VALID') ? '#00E5A0' : '#FF3B5C')
+                                        : 'var(--text-primary)',
+                                    fontWeight: k === 'Signature' ? 600 : 400,
+                                }}>{v}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Classification signals (for NOT_UPI_SCREENSHOT) */}
+                {isNotUPI && result.classification_signals && result.classification_signals.length > 0 && (
+                    <div style={{
+                        background: 'rgba(255,176,32,0.06)',
+                        border: '1px solid rgba(255,176,32,0.15)',
+                        borderRadius: 14, padding: 16, marginBottom: 16,
+                    }}>
+                        <p style={{ fontWeight: 600, marginBottom: 10, fontSize: 14, color: '#FFB020' }}>
+                            🔍 Classification Details
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {result.classification_signals.map((signal, i) => (
+                                <div key={i} style={{
+                                    display: 'flex', alignItems: 'center', gap: 8,
+                                    fontSize: 13, color: 'var(--text-secondary)',
+                                }}>
+                                    <span style={{
+                                        width: 6, height: 6, borderRadius: '50%',
+                                        background: signal.includes('upi_text') || signal.includes('rupee')
+                                            ? 'var(--accent-green)'
+                                            : signal.includes('no_') || signal.includes('non_')
+                                                ? 'var(--accent-red)'
+                                                : 'var(--text-muted)',
+                                        flexShrink: 0,
+                                    }} />
+                                    <span>{signal}</span>
+                                </div>
+                            ))}
                         </div>
-                    ))}
-                </div>
+                    </div>
+                )}
+
+                {/* NOT_UPI — Guidance */}
+                {isNotUPI && (
+                    <div style={{
+                        background: 'rgba(0,212,255,0.04)',
+                        border: '1px solid rgba(0,212,255,0.12)',
+                        borderRadius: 14, padding: 16, marginBottom: 16,
+                    }}>
+                        <p style={{ fontWeight: 600, marginBottom: 8, fontSize: 14, color: 'var(--accent-cyan)' }}>
+                            💡 Tips for a valid upload:
+                        </p>
+                        <ul style={{
+                            color: 'var(--text-secondary)', fontSize: 13, paddingLeft: 18,
+                            display: 'flex', flexDirection: 'column', gap: 4, lineHeight: 1.6,
+                        }}>
+                            <li>Take a <strong>full screenshot</strong> of the UPI payment confirmation screen</li>
+                            <li>The screenshot should show the <strong>transaction status</strong>, <strong>amount</strong>, and <strong>UPI reference number</strong></li>
+                            <li>Supported apps: <strong>Google Pay, PhonePe, Paytm, BHIM</strong></li>
+                            <li>Save or share the screenshot as <strong>PNG</strong> (not JPEG)</li>
+                        </ul>
+                    </div>
+                )}
 
                 {/* Preview */}
                 {preview && (
@@ -271,7 +358,7 @@ export default function ScreenshotChecker({ onReport }) {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    {!isGenuine && (
+                    {!isGenuine && !isNotUPI && (
                         <button
                             onClick={() => onReport?.({
                                 item: `Screenshot: ${fileName}`,
@@ -287,7 +374,7 @@ export default function ScreenshotChecker({ onReport }) {
                     <button onClick={reset} className="btn-primary" style={{
                         flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120,
                     }}>
-                        Check Another
+                        {isNotUPI ? 'Upload UPI Screenshot' : 'Check Another'}
                     </button>
                 </div>
             </div>
@@ -369,9 +456,10 @@ export default function ScreenshotChecker({ onReport }) {
                 </p>
                 <div style={{ display: 'grid', gap: 8 }}>
                     {[
-                        ['1', 'App Detection', 'OCR + color analysis identifies GPay, PhonePe, Paytm, or BHIM'],
-                        ['2', 'Signature Extraction', 'Hidden LSB steganography string is extracted from pixel data'],
-                        ['3', 'Database Verification', 'Extracted signature is cross-checked against our lookup table'],
+                        ['1', 'Image Classification', 'Verifies the image is actually a UPI payment screenshot (aspect ratio, text patterns)'],
+                        ['2', 'App Detection', 'OCR + color analysis identifies GPay, PhonePe, Paytm, or BHIM'],
+                        ['3', 'Signature Extraction', 'Hidden LSB steganography string is extracted from pixel data'],
+                        ['4', 'Database Verification', 'Extracted signature is cross-checked against our lookup table'],
                     ].map(([num, title, desc]) => (
                         <div key={num} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                             <div style={{

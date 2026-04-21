@@ -98,6 +98,8 @@ export default function QRChecker({ onReport }) {
     const reset = () => { setResult(null); setError(''); setPreview(null); setManualText(''); setVouched(false); stopCamera() }
 
     const handleVouch = async () => {
+        // Never allow vouching for unrecognised bank handles — they are confirmed fraud
+        if (result._unknownHandle) return
         const identifier = result.pa || result.rawText
         if (!identifier) return
         removeReportedItem(identifier)
@@ -168,9 +170,11 @@ export default function QRChecker({ onReport }) {
                             ✅ Marked as Safe
                         </button>
                     ) : (
-                        <button onClick={handleVouch} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, color: '#00E5A0' }}>
-                            <ShieldCheck size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Mark as Safe
-                        </button>
+                        !result._unknownHandle && (
+                            <button onClick={handleVouch} className="btn-secondary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120, color: '#00E5A0' }}>
+                                <ShieldCheck size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Mark as Safe
+                            </button>
+                        )
                     )}
                     <button onClick={reset} className="btn-primary" style={{ flex: 1, borderRadius: 12, padding: '10px 16px', fontSize: 14, minWidth: 120 }}>Check Another</button>
                 </div>

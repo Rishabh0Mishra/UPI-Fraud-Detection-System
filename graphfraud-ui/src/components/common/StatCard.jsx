@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { LineChart, Line, ResponsiveContainer } from 'recharts'
 
-export default function StatCard({ title, value, subtitle, color = 'var(--accent-cyan)', icon: Icon, sparklineData }) {
+export default function StatCard({ title, value, subtitle, color = 'var(--accent)', icon: Icon, sparklineData }) {
     const [displayVal, setDisplayVal] = useState(0)
     const isNumeric = typeof value === 'number' && !isNaN(value)
     const prevValue = useRef(0)
@@ -33,17 +33,64 @@ export default function StatCard({ title, value, subtitle, color = 'var(--accent
     }
 
     return (
-        <div className="card relative overflow-hidden" style={{ borderLeft: `3px solid ${color}` }}>
-            <div className="flex items-start justify-between">
-                <div>
-                    <div className="text-xs font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--text-secondary)' }}>{title}</div>
-                    <div className="mono text-2xl font-bold" style={{ color }}>{isNumeric ? formatNum(displayVal) : value}</div>
-                    {subtitle && <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{subtitle}</div>}
-                </div>
-                {Icon && <Icon size={20} style={{ color, opacity: 0.5 }} />}
+        <div
+            className="panel"
+            style={{
+                position: 'relative',
+                overflow: 'hidden',
+                borderLeft: `2px solid ${color}`,
+                padding: '14px 16px',
+            }}
+        >
+            {/* Eyebrow label */}
+            <div
+                style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 8,
+                    letterSpacing: '2.5px',
+                    textTransform: 'uppercase',
+                    color: 'var(--text3)',
+                    marginBottom: 8,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                }}
+            >
+                <span>{title}</span>
+                {Icon && <Icon size={14} strokeWidth={1.5} style={{ color, opacity: 0.5 }} />}
             </div>
+
+            {/* Value — Bebas Neue display font */}
+            <div
+                style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: 38,
+                    letterSpacing: '-0.5px',
+                    color: 'var(--text)',
+                    lineHeight: 1,
+                    marginBottom: 4,
+                }}
+            >
+                {isNumeric ? formatNum(displayVal) : value}
+            </div>
+
+            {/* Subtitle */}
+            {subtitle && (
+                <div
+                    style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 9,
+                        color: 'var(--text3)',
+                        letterSpacing: '0.5px',
+                    }}
+                >
+                    {subtitle}
+                </div>
+            )}
+
+            {/* Sparkline */}
             {sparklineData && sparklineData.length > 0 && (
-                <div className="absolute bottom-2 right-2" style={{ width: 60, height: 28, opacity: 0.4 }}>
+                <div style={{ position: 'absolute', bottom: 8, right: 8, width: 60, height: 28, opacity: 0.35 }}>
                     <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={sparklineData}>
                             <Line type="monotone" dataKey="v" stroke={color} strokeWidth={1.5} dot={false} />

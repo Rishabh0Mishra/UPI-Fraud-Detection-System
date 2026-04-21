@@ -109,23 +109,13 @@ export const filterLiveFeed = async (filters = {}) => {
 // ── Dashboard Endpoints ──
 
 export const getDashboardStats = async (window = '1_HOUR') => {
-    return tryOrFallback(
-        async () => {
-            const { data } = await client.get(`/api/dashboard/stats?window=${window}`)
-            return data
-        },
-        () => generateMockDashboardStats()
-    )
+    const { data } = await client.get(`/api/dashboard/stats?window=${window}`)
+    return data
 }
 
 export const getDashboardChartData = async (hours = 24) => {
-    return tryOrFallback(
-        async () => {
-            const { data } = await client.get(`/api/dashboard/chart-data?hours=${hours}`)
-            return data
-        },
-        () => ({ hourly_trend: generateMockHourlyTrend() })
-    )
+    const { data } = await client.get(`/api/dashboard/chart-data?hours=${hours}`)
+    return data
 }
 
 export const getDashboardRecentAlerts = async (limit = 10) => {

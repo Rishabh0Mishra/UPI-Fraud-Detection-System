@@ -2,12 +2,39 @@ import { AlertTriangle, RefreshCw } from 'lucide-react'
 
 export default function ErrorBanner({ message, onRetry }) {
     return (
-        <div className="card flex items-center gap-3" style={{ borderColor: 'var(--accent-red)', background: 'rgba(255,59,92,0.05)' }}>
-            <AlertTriangle size={20} style={{ color: 'var(--accent-red)' }} />
-            <span className="flex-1 text-sm" style={{ color: 'var(--accent-red)' }}>{message}</span>
+        <div
+            className="panel"
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                borderColor: 'rgba(232,82,82,0.3)',
+                background: 'rgba(232,82,82,0.06)',
+            }}
+        >
+            <AlertTriangle size={18} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+            <span
+                style={{
+                    flex: 1,
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11,
+                    color: 'var(--danger)',
+                    letterSpacing: '0.5px',
+                }}
+            >
+                {message}
+            </span>
             {onRetry && (
-                <button onClick={onRetry} className="btn-secondary text-xs" style={{ color: 'var(--accent-red)' }}>
-                    <RefreshCw size={14} /> Retry
+                <button
+                    onClick={onRetry}
+                    className="btn-secondary"
+                    style={{
+                        color: 'var(--danger)',
+                        borderColor: 'rgba(232,82,82,0.25)',
+                        fontSize: 10,
+                    }}
+                >
+                    <RefreshCw size={12} /> Retry
                 </button>
             )}
         </div>

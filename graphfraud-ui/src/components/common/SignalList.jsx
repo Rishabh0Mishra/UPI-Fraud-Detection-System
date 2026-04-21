@@ -1,30 +1,31 @@
 import { useState, useEffect } from 'react'
 import { XCircle, AlertTriangle, CheckCircle, Info } from 'lucide-react'
 
+// Updated to use new design system tokens
 const LEVEL_CONFIG = {
     danger: {
         icon: XCircle,
-        color: '#FF3B5C',
-        bg: 'rgba(255,59,92,0.08)',
-        border: 'rgba(255,59,92,0.25)',
+        color: 'var(--danger)',
+        bg: 'rgba(232,82,82,0.08)',
+        border: 'rgba(232,82,82,0.25)',
     },
     warning: {
         icon: AlertTriangle,
-        color: '#FFB020',
-        bg: 'rgba(255,176,32,0.08)',
-        border: 'rgba(255,176,32,0.25)',
+        color: 'var(--warn)',
+        bg: 'rgba(212,168,67,0.08)',
+        border: 'rgba(212,168,67,0.25)',
     },
     safe: {
         icon: CheckCircle,
-        color: '#00E5A0',
-        bg: 'rgba(0,229,160,0.08)',
-        border: 'rgba(0,229,160,0.25)',
+        color: 'var(--safe)',
+        bg: 'rgba(92,186,138,0.08)',
+        border: 'rgba(92,186,138,0.25)',
     },
     info: {
         icon: Info,
-        color: '#00D4FF',
-        bg: 'rgba(0,212,255,0.08)',
-        border: 'rgba(0,212,255,0.25)',
+        color: 'var(--accent)',
+        bg: 'rgba(232,184,109,0.08)',
+        border: 'rgba(232,184,109,0.20)',
     },
 }
 
@@ -50,7 +51,7 @@ export default function SignalList({ signals = [] }) {
     if (!signals.length) return null
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {signals.map((signal, idx) => {
                 const config = LEVEL_CONFIG[signal.level] || LEVEL_CONFIG.info
                 const Icon = config.icon
@@ -63,26 +64,34 @@ export default function SignalList({ signals = [] }) {
                             display: 'flex',
                             alignItems: 'flex-start',
                             gap: 10,
-                            padding: '10px 14px',
-                            borderRadius: 12,
+                            padding: '9px 12px',
+                            borderRadius: 6,
                             background: config.bg,
-                            borderLeft: `3px solid ${config.border}`,
+                            borderLeft: `2px solid ${config.border}`,
                             opacity: visible ? 1 : 0,
                             transform: visible ? 'translateY(0)' : 'translateY(8px)',
                             transition: 'opacity 0.3s ease, transform 0.3s ease',
-                            fontSize: 14,
                             lineHeight: 1.5,
                         }}
                     >
                         <Icon
-                            size={16}
+                            size={14}
                             style={{
                                 color: config.color,
                                 flexShrink: 0,
                                 marginTop: 2,
                             }}
+                            strokeWidth={1.5}
                         />
-                        <span style={{ color: 'var(--text-primary)' }}>{signal.text}</span>
+                        <span
+                            style={{
+                                fontFamily: 'var(--font-body)',
+                                fontSize: 12,
+                                color: 'var(--text)',
+                            }}
+                        >
+                            {signal.text}
+                        </span>
                     </div>
                 )
             })}

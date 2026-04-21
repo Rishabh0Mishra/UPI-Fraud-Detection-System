@@ -1,12 +1,16 @@
 import { useState, useRef } from 'react'
 import { useLiveFeed } from '../context/LiveFeedContext'
+import { useDashboard } from '../context/DashboardContext'
 import DecisionBadge from '../components/common/DecisionBadge'
 import { Play, Pause, Trash2, Search, Radio } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
 export default function LiveFeed() {
-    // All persistent state comes from the context (survives page navigation)
-    const { transactions, stats, isLive, setIsLive, wsConnected, clearFeed } = useLiveFeed()
+    // Transaction list + live controls — session-based (context survives nav)
+    const { transactions, stats: sessionStats, isLive, setIsLive, wsConnected, clearFeed } = useLiveFeed()
+    // DB-backed ALL_TIME totals — same source as Dashboard so numbers always match
+    const { stats: dbStats } = useDashboard()
+
 
     // Local-only UI state (filter / search don't need to persist)
     const [filter, setFilter] = useState('ALL')
@@ -77,19 +81,25 @@ export default function LiveFeed() {
                 </button>
             </div>
 
-            {/* Stats strip */}
-            <div className="flex gap-6 px-2">
+            {/* Stats strip — all counts from DB (same source as Dashboard) */}
+            <div className="flex gap-6 px-2 flex-wrap">
                 <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    <span className="mono font-medium" style={{ color: 'var(--text-primary)' }}>{stats.scored.toLocaleString('en-IN')}</span> scored
+                    <span className="mono font-medium" style={{ color: 'var(--text-primary)' }}>
+                        {(dbStats?.total_transactions ?? sessionStats.scored).toLocaleString('en-IN')}
+                    </span> scored
                 </span>
                 <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    <span className="mono font-medium" style={{ color: 'var(--accent-green)' }}>{stats.noFraud}</span> safe
+                    <span className="mono font-medium" style={{ color: 'var(--accent-green)' }}>
+                        {(dbStats?.no_fraud_count ?? sessionStats.noFraud).toLocaleString('en-IN')}
+                    </span> safe
                 </span>
                 <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    <span className="mono font-medium" style={{ color: 'var(--accent-red)' }}>{stats.fraud}</span> fraud
+                    <span className="mono font-medium" style={{ color: 'var(--accent-red)' }}>
+                        {(dbStats?.fraud_count ?? sessionStats.fraud).toLocaleString('en-IN')}
+                    </span> fraud
                 </span>
                 <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    Avg latency: <span className="mono font-medium">{stats.avgLatency}ms</span>
+                    Avg latency: <span className="mono font-medium">{sessionStats.avgLatency}ms</span>
                 </span>
                 {isLive && (
                     <span className="flex items-center gap-1.5 text-xs" style={{ color: wsConnected ? 'var(--accent-green)' : 'var(--accent-amber)' }}>
@@ -98,6 +108,8 @@ export default function LiveFeed() {
                     </span>
                 )}
             </div>
+
+
 
             {/* Transaction Stream */}
             <div className="space-y-2" ref={scrollRef} style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
