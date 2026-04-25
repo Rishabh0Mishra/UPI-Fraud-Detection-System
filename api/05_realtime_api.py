@@ -210,6 +210,8 @@ class ModelRegistry:
         if cal_path.exists():
             with open(cal_path, "rb") as f:
                 self.calibrator = pickle.load(f)
+            if not hasattr(self.calibrator, "multi_class"):
+                self.calibrator.multi_class = "ovr"
             logger.info(f"  Score calibrator loaded")
 
         # ── Graph Risk Scores ──

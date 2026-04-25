@@ -23,6 +23,7 @@ import os
 import re
 import logging
 import sqlite3
+from typing import Optional
 import tempfile
 from pathlib import Path
 
@@ -422,7 +423,7 @@ def detect_upi_app(image_path: str) -> dict:
     Combines OCR keyword matching + dominant color analysis.
 
     Returns: {
-        detected_app: str | None,
+        detected_app: Optional[str],
         display_name: str,
         confidence: float (0-1),
         method: str
@@ -500,7 +501,7 @@ _LSB_DELIMITER = "###END###"
 _DEFAULT_SEED = 42
 
 
-def extract_lsb_string(image_path: str, string_length: int = 16) -> str | None:
+def extract_lsb_string(image_path: str, string_length: int = 16) -> Optional[str]:
     """
     Extract a hidden LSB steganography string from a PNG image.
 
@@ -604,7 +605,7 @@ REASON_MESSAGES = {
 }
 
 
-def verify_against_table(detected_app: str | None, extracted_string: str | None) -> dict:
+def verify_against_table(detected_app: Optional[str], extracted_string: Optional[str]) -> dict:
     """
     Verify the extracted LSB string against the screenshot_verification_table.
 
@@ -620,7 +621,7 @@ def verify_against_table(detected_app: str | None, extracted_string: str | None)
         reason_code:  str,
         message:      str,
         risk_score:   int (0 or 100),
-        matched_app:  str | None  (the app the string belongs to)
+        matched_app:  Optional[str]  (the app the string belongs to)
     }
     """
     # Case: No string extracted at all
